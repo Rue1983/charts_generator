@@ -5,6 +5,7 @@ import geoip2.database
 import numpy as np
 import datetime
 from collections import Counter
+from pygal.style import DefaultStyle
 
 reason_dict = {1: '隐藏字段篡改', 2: '单选按钮篡改', 3: '链接参数篡改', 4: '未知字段', 5: '未知字段类型', 6: '缓存溢出攻击',
                7: '复选框篡改', 8: 'Cookie篡改', 9: '链接参数篡改', 10: '强制浏览', 11: '非正常HTTP请求', 12: 'HTTP请求方法无效',
@@ -103,7 +104,7 @@ def get_data_by_reasons(db_name):
         c = conn.cursor()
         cursor = c.execute("SELECT reason, count(*) from alerts as Reason group by reason order by count(reason) DESC")
         for row in cursor:
-            tmp = [reason_dict[row[0]], row[1]]
+            tmp = [reason_dict_en[row[0]], row[1]]
             result.append(tmp)
         return result
 
@@ -347,15 +348,20 @@ def reason_type_chart_pygal(chart_data):
         pie_chart.add(data[0], data[1])
         pie_chart.render()
     pie_chart.render_to_file('reason_type_pie.svg')
-    #pie_chart.print_values = True
-    #pie_chart.render_to_png('reason_type_pie.png')
+    pie_chart.print_values = True
+    pie_chart.style = DefaultStyle(
+        value_font_family='googlefont:Raleway',
+        value_font_size=30,
+        value_colors=('white',) * 15)
+    pie_chart.render_to_png('reason_type_pie.png')
 
 
-#reason_type_chart_pygal(get_data_by_reasons('alertsbig.db'))
-#ip_source_chart_pygal(get_top10_ip("alertsbig.db"))
+reason_type_chart_pygal(get_data_by_reasons('alertsbig.db'))
+##ip_source_chart_pygal(get_top10_ip("alertsbig.db"))
 #alerts_world_map_via_ip(get_top10_ip("alertsbig.db"))
 #alerts_by_date_chart_pygal(get_alerts_time_reason("alertsbig.db"))
 #uri_counts_by_reason(9, get_uri_by_reason(9, "alertsbig.db"))
+#all_alert_counts_by_reason_24h('alertsbig.db')
 
 # generate 24 chart for all ip and all date
 #alert_counts_by_reason_24h('all', '2018-01-16', '2118-04-04', 'alertsbig.db')
@@ -363,7 +369,7 @@ def reason_type_chart_pygal(chart_data):
 #alerts_by_reason_in_24h("20180401", get_alerts_time_reason("alertsbig.db"))
 #get_location_by_ip("218.94.157.126")
 #get_reason_counts_by_date('114.249.227.204', '2018-01-19', '2018-01-20', 'alertsbig.db')
-all_alert_counts_by_reason_24h('alertsbig.db')
+
 
 
 
