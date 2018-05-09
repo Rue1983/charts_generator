@@ -2,12 +2,8 @@ import pygal
 import os
 import sqlite3
 import geoip2.database
-import seaborn
-import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import datetime
-from datetime import date
 from collections import Counter
 
 reason_dict = {1: '隐藏字段篡改', 2: '单选按钮篡改', 3: '链接参数篡改', 4: '未知字段', 5: '未知字段类型', 6: '缓存溢出攻击',
@@ -20,22 +16,29 @@ reason_dict_en = {1: 'Hidden Field Tampering', 2: 'Radio Button Tampering', 3: '
                   15: 'Special Characters'}
 
 
-def get_data_from_db(db_name):
+def get_first_last_date(db_name):
     """
-    Get everything from given sqlite db
+    Get the date of first and last record in the given db
     :param db_name:
-    :return: A list of result
+    :return: firstdate, lastdate+1  (to adapt the "between" operator)
     """
     if os.path.isfile(db_name) is False:
-        return 0
+        return -1
     else:
         result = []
         conn = sqlite3.connect(db_name)
         c = conn.cursor()
-        cursor = c.execute("SELECT * from alerts")
+        cursor = c.execute('select time from alerts order by time limit 1')
         for row in cursor:
             result.append(row)
-        return result
+        cursor = c.execute('select time from alerts order by time DESC limit 1')
+        for row in cursor:
+            result.append(row)
+        start_date = datetime.datetime.strptime(str(result[0][0]), "%Y-%m-%dT%H:%M:%S%z")
+        end_date = datetime.datetime.strptime(str(result[1][0]), "%Y-%m-%dT%H:%M:%S%z") + datetime.timedelta(days=1)
+        start_str = start_date.strftime("%Y-%m-%d")
+        end_str = end_date.strftime("%Y-%m-%d")
+        return start_str, end_str
 
 
 def get_upper_limit(data_list):
@@ -50,6 +53,22 @@ def get_upper_limit(data_list):
     return int(ul)
 
 
+def get_alerts_by_ip(ip, db_name):
+    """
+    Get top 10 ip source and alerts counts.
+    :param db_name:
+    :return: a list of result
+    """
+    if os.path.isfile(db_name) is False:
+        return -1
+    else:
+        result = []
+        conn = sqlite3.connect(db_name)
+        c = conn.cursor()
+        cursor = c.execute('SELECT ip, reason, time from alerts where ip = "%s"' % ip)
+        for row in cursor:
+            result.append(row)
+        return result
 
 
 def get_top10_ip(db_name):
@@ -59,7 +78,7 @@ def get_top10_ip(db_name):
     :return: a list of result
     """
     if os.path.isfile(db_name) is False:
-        return 0
+        return -1
     else:
         result = []
         conn = sqlite3.connect(db_name)
@@ -77,7 +96,7 @@ def get_data_by_reasons(db_name):
     :return: A list of reason names and related counts
     """
     if os.path.isfile(db_name) is False:
-        return 0
+        return -1
     else:
         result = []
         conn = sqlite3.connect(db_name)
@@ -89,9 +108,56 @@ def get_data_by_reasons(db_name):
         return result
 
 
+def get_reason_counts_by_date(ip_addr, start_date, end_date, db_name):
+    """
+    Get reson counts by given start date and end date
+    :param ip_addr: specific ip
+    :param start_date:
+    :param end_date: Any record before this value will be included.
+    :param db_name: alert db name
+    :return:
+    """
+    if os.path.isfile(db_name) is False:
+        exit(1)
+    else:
+        result = []
+        conn = sqlite3.connect(db_name)
+        c = conn.cursor()
+        if ip_addr == 'all':
+            cursor = c.execute(
+                'select time,reason from alerts where time between date(\'%s\') and date(\'%s\')'
+                ' order by time' % (start_date, end_date))
+        else:
+            cursor = c.execute('select time,reason from alerts where ip="%s" and time between date(\'%s\')'
+                               ' and date(\'%s\') order by time' % (ip_addr, start_date, end_date))
+        for row in cursor:
+            result.append(row)
+    #print(result)
+    return result
+
+
+def get_uri_by_reason(reason, db_name):
+    """
+    Get uri numbers and time by specific reason code
+    :param reason: reason code
+    :param db_name: path of alerts.db
+    :return: A list of uri,time,count for one reason in the db
+    """
+    if os.path.isfile(db_name) is False:
+        return -1
+    else:
+        result = []
+        conn = sqlite3.connect(db_name)
+        c = conn.cursor()
+        cursor = c.execute("SELECT uri, count(*) from alerts where reason = %d group by uri order by count(uri) DESC limit 10" % reason)
+        for row in cursor:
+            result.append(row)
+        return result
+
+
 def get_alerts_time_reason(db_name):
     if os.path.isfile(db_name) is False:
-        return 0
+        return -1
     else:
         result = []
         conn = sqlite3.connect(db_name)
@@ -103,6 +169,11 @@ def get_alerts_time_reason(db_name):
 
 
 def get_location_by_ip(ip):
+    """
+    Get country name and city name base on the given ip address
+    :param ip:
+    :return: (string) cityname, countryname
+    """
     reader = geoip2.database.Reader('GeoLite2-City.mmdb')
     try:
         response = reader.city(ip)
@@ -111,6 +182,63 @@ def get_location_by_ip(ip):
     else:
         return response.city.name, response.country.name
 
+
+def alert_counts_by_reason_24h(ip_addr, start_date, end_date, db_name):
+    """
+    Generate chart for reasons counts in 24h for a specific ip
+    :param ip_addr: specific ip address
+    :param start_date:
+    :param end_date:
+    :param db_name:
+    :return:
+    """
+    chart_data = get_reason_counts_by_date(ip_addr, start_date, end_date, db_name)
+    line_chart = pygal.StackedLine(fill=True, truncate_legend=-1, human_readable=True)
+    if ip_addr == "all":
+        line_chart.title = 'Alerts in 24 hours from %s to %s' % (start_date, end_date)
+    else:
+        line_chart.title = 'Alerts in 24 hours of %s from %s to %s' % (ip_addr, start_date, end_date)
+    line_chart.x_labels = map(str, range(1, 24))
+    dict_24hours = {c: [0]*24 for c in range(1, 16)}
+    for i in chart_data:
+        alert_dt = datetime.datetime.strptime(i[0], "%Y-%m-%dT%H:%M:%S%z")
+        reason_code = i[1]
+        hour = int(alert_dt.strftime('%H'))
+        dict_24hours[reason_code][hour - 1] += 1
+    for k in dict_24hours.keys():
+        if sum(dict_24hours[k]) == 0:
+            continue
+        line_chart.add(reason_dict_en[k], dict_24hours[k], show_dots=False)
+    line_chart.force_uri_protocol = 'http'
+    line_chart.render_to_file('24h_stackedline_chart_%s.svg' % ip_addr)
+    #line_chart.render_to_png('24h_stackedline_chart_%s.png' % ip_addr)
+
+
+def all_alert_counts_by_reason_24h(db_name):
+    """
+    Generate 24h tread chart for the whole data set in given db
+    :param db_name:
+    :return:
+    """
+    start_date, end_date = get_first_last_date(db_name)
+    alert_counts_by_reason_24h('all', start_date, end_date, db_name)
+
+
+def uri_counts_by_reason(reason_code, chart_data):
+    """
+    Generate chart for specific reason to show the affected numbers
+    :param reason_code: 
+    :param chart_data: 
+    :return: 
+    """
+    reason_name = reason_dict_en[reason_code]
+    h_bar = pygal.HorizontalBar(truncate_legend=-1, human_readable=True, legend_at_bottom=True,
+                                legend_at_bottom_columns=1)
+    h_bar.title = 'Top 10 affected URI numbers of %s' % reason_name
+    for uri_counts in chart_data:
+        h_bar.add(uri_counts[0], int(uri_counts[1]))
+    h_bar.render_to_file('URI_by_reason_%s.svg' % reason_name)
+    #h_bar.render_to_png('URI_by_reason_%s.png' % reason_name)
 
 
 def alerts_by_reason_in_24h(date, chart_data):
@@ -136,7 +264,7 @@ def alerts_by_reason_in_24h(date, chart_data):
     line_chart.human_readable = True
     line_chart.force_uri_protocol = 'http'
     line_chart.render_to_file('24h_stackedline_chart_%s.svg' % date)
-    # line_chart.render_to_png('24h_stackedline_chart_%s.png' % date)
+    #line_chart.render_to_png('24h_stackedline_chart_%s.png' % date)
 
 
 def alerts_by_date_chart_pygal(chart_data):
@@ -166,7 +294,7 @@ def alerts_by_date_chart_pygal(chart_data):
         bar_chart.add(k, alert_dict[k])
         # dt_k = datetime.datetime.strptime(k, '%Y%m%d').date()
         # dateline_chart.add(dt_k, alert_dict[k])
-    # bar_chart.render_to_png('alerts_by_date.png')
+    #bar_chart.render_to_png('alerts_by_date.png')
     bar_chart.render_to_file('alerts_by_date.svg')
     # dateline_chart.render_to_png('alerts_by_dateline.png')
     # dateline_chart.render_to_file('alerts_by_dateline.svg')
@@ -192,12 +320,15 @@ def alerts_world_map_via_ip(chart_data):
     worldmap_chart.add('Alerts number', dict_country)
     worldmap_chart.render()
     worldmap_chart.render_to_file("alerts_world_map.svg")
+    #worldmap_chart.render_to_png("alerts_world_map.png")
 
 
-##################################
-# Generate a bar chart
-# for top 10 ip sources
 def ip_source_chart_pygal(chart_data):
+    """
+    Generate bar chart to display ip source numbers
+    :param chart_data:
+    :return:
+    """
     bar_chart = pygal.Bar(truncate_legend=-1, human_readable=True)
     bar_chart.title = 'Top 10 IP Source'
     for data in chart_data:
@@ -206,34 +337,7 @@ def ip_source_chart_pygal(chart_data):
         bar_chart.add(x_label_name, data[1])
         bar_chart.render()
     bar_chart.render_to_file('ip_source_bar.svg')
-    # bar_chart.render_to_png('ip_source_bar.png')
-
-
-def ip_source_chart_seaborn(chart_data):
-    x = []
-    y = []
-    for data in chart_data:
-        x.append(data[0])
-        y.append(data[1])
-    seaborn.set_style("whitegrid")
-    ax = seaborn.barplot(x, y, hue=x)
-    ax.set_title('Top 10 IP Source')
-    ax.set_xlabel('IP Address')
-    ax.set_ylabel('Count')
-    plt.xticks([])
-    ax.set_xlim(-0.5, 9.5)
-    widthbars = [1, 10, 1, 1, 1, 1, 1, 1, 1, 1, 1]
-    for bar, newwidth in zip(ax.patches, widthbars):
-        x = bar.get_x()
-        width = bar.get_width()
-        centre = x + width / 2.
-        bar.set_x(centre - newwidth / 2.)
-        bar.set_width(newwidth)
-    # plt.figure(figsize=(1, 1))
-    plt.savefig('ip_source_seaborn.png')
-    plt.show()
-    # plt.close()
-    # plt.plot(x, y_line, '-o', color='y')
+    #bar_chart.render_to_png('ip_source_bar.png')
 
 
 def reason_type_chart_pygal(chart_data):
@@ -243,90 +347,45 @@ def reason_type_chart_pygal(chart_data):
         pie_chart.add(data[0], data[1])
         pie_chart.render()
     pie_chart.render_to_file('reason_type_pie.svg')
-    pie_chart.print_values = True
+    #pie_chart.print_values = True
     #pie_chart.render_to_png('reason_type_pie.png')
 
 
-def chart_alerts_by_time_seaborn(csv_name):
-    df_alerts = pd.read_csv(csv_name, delimiter="\t")
-    seaborn.distplot(df_alerts['reason'], kde=False)
-    seaborn.plt.show()
-    plt.close()
-
-
-reason_type_chart_pygal(get_data_by_reasons('alertsbig.db'))
-#ip_source_chart_seaborn(get_top10_ip("alertsbig.db"))
+#reason_type_chart_pygal(get_data_by_reasons('alertsbig.db'))
 #ip_source_chart_pygal(get_top10_ip("alertsbig.db"))
 #alerts_world_map_via_ip(get_top10_ip("alertsbig.db"))
-#chart_alerts_by_time_seaborn("a.csv")
 #alerts_by_date_chart_pygal(get_alerts_time_reason("alertsbig.db"))
+#uri_counts_by_reason(9, get_uri_by_reason(9, "alertsbig.db"))
+
+# generate 24 chart for all ip and all date
+#alert_counts_by_reason_24h('all', '2018-01-16', '2118-04-04', 'alertsbig.db')
+
 #alerts_by_reason_in_24h("20180401", get_alerts_time_reason("alertsbig.db"))
 #get_location_by_ip("218.94.157.126")
+#get_reason_counts_by_date('114.249.227.204', '2018-01-19', '2018-01-20', 'alertsbig.db')
+all_alert_counts_by_reason_24h('alertsbig.db')
 
 
 
-def draw_bar(chart_data):
-    x = []
-    y_bar = []
-    for data in chart_data:
-        x.append(data[0])
-        y_bar.append(data[1])
-    width = 0.4
-    ind = np.linspace(0.5, 9.5, 10)
-    # make a square figure
-    fig = plt.figure(1)
-    ax = fig.add_subplot(111)
-    # Bar Plot
-    ax.bar(ind-width/2, y_bar, width, color='green')
-    # Set the ticks on x-axis
-    ax.set_xticks(ind)
-    ax.set_xticklabels(x)
-    # labels
-    ax.set_xlabel('Country')
-    ax.set_ylabel('GDP (Billion US dollar)')
-    # title
-    ax.set_title('Top 10 GDP Countries', bbox={'facecolor': '0.8', 'pad': 5})
-    plt.grid(True)
-    plt.savefig('test.png')
-    plt.show()
+"""
+class Usage(Exception):
+    def __init__(self,msg):
+        self.msg = msg
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv
+    try:
+        try:
+            opts, args = getopt.getopt(argv[1:], "h", ["help"])
+        except getopt.error, msg:
+            raise Usage(msg)
+    except Usage, err:
+        print(sys.stderr, err.msg)
+        print(sys.stderr, "for help use --help")
+        return 2
 
 
-def draw_bar2(self, labels, quants):
-    width = 0.8
-    ind = np.linspace(1, 66, 65)
-    # 绘图参数全家桶
-    params = {
-        'axes.labelsize': '16',
-        'xtick.labelsize': '16',
-        'ytick.labelsize': '13',
-        'lines.linewidth': '2',
-        'legend.fontsize': '20',
-        'figure.figsize': '26, 24'  # set figure size
-    }
+if __name__ == "__main__":
+    sys.exit(main())
+"""
 
-    #pylab.rcParams.update(params)
-    # make a square figure
-    fig = plt.figure(1)
-    ax = fig.add_subplot(111)
-    # Bar Plot
-    # 横的柱状图
-    ax.barh(ind - width / 2, quants, width, color='blue')
-    # 竖的柱状图
-    # ax.bar(ind - width / 2, quants, width, color='blue')
-    # Set the ticks on x-axis
-    ax.set_yticks(ind)
-    ax.set_yticklabels(labels)
-    # 竖的柱状图
-    # ax.set_xticks(ind)
-    # ax.set_xticklabels(labels)
-    # labels
-    ax.set_xlabel('xxx')
-    ax.set_ylabel('xxxxxxxx')
-    # title
-    ax.set_title('xxxxxxxxxxxxx')
-    plt.grid(True)
-    # 也可以这样设置图片大小
-    # plt.figure(figsize=())
-    # plt.show()
-    plt.savefig("bar.jpg")
-    plt.close()
