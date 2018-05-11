@@ -362,10 +362,9 @@ def alerts_world_map_via_ip_basemap(chart_data):
     m.bluemarble(scale=0.5)
     m.fillcontinents(color='#C0C0C0', lake_color='#1A4680', zorder=0.1)
     #x, y = m(lon, lat)
-    size = (alert_num/np.max(alert_num))*200
+    size = (alert_num/np.max(alert_num))*100
     print(size)
-    m.scatter(lon, lat, s=size, label='Alerts Numbers', color='red', latlon=True)
-
+    m.scatter(lon, lat, s=size, label='Alerts Numbers', color='red', marker='v', zorder=2, latlon=True)
     plt.title('Malicious Internet Traffic Source Map')
     plt.savefig('world1.png', dpi=150)
     plt.show()
