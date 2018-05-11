@@ -4,8 +4,11 @@ import sqlite3
 import geoip2.database
 import numpy as np
 import datetime
+import pickle
 from collections import Counter
 from pygal.style import DefaultStyle
+from mpl_toolkits.basemap import Basemap
+import matplotlib.pyplot as plt
 
 reason_dict = {1: '隐藏字段篡改', 2: '单选按钮篡改', 3: '链接参数篡改', 4: '未知字段', 5: '未知字段类型', 6: '缓存溢出攻击',
                7: '复选框篡改', 8: 'Cookie篡改', 9: '链接参数篡改', 10: '强制浏览', 11: '非正常HTTP请求', 12: 'HTTP请求方法无效',
@@ -324,6 +327,50 @@ def alerts_world_map_via_ip(chart_data):
     #worldmap_chart.render_to_png("alerts_world_map.png")
 
 
+def alerts_world_map_via_ip_basemap(chart_data):
+    reader = geoip2.database.Reader('GeoLite2-City.mmdb')
+    dict_city = {}
+    lat = []
+    lon = []
+    alert_num = []
+    for data in chart_data:
+        try:
+            response = reader.city(data[0])
+        except geoip2.errors.AddressNotFoundError:
+            print("internal")  # TODO:  Handle internal ip here
+        else:
+            location = [response.location.latitude,  response.location.longitude]
+            loc_ser = pickle.dumps(location)
+            if loc_ser not in dict_city:
+                dict_city[loc_ser] = data[1]
+            else:
+                tmp = dict_city[loc_ser]
+                dict_city[loc_ser] = int(tmp) + int(data[1])
+    for i in dict_city.keys():
+        lat.append(float(pickle.loads(i)[0]))
+        lon.append(float(pickle.loads(i)[1]))
+        alert_num.append(float(dict_city[i]))
+    print(lat, lon, alert_num)
+
+    # Draw map
+    fig = plt.figure(figsize=(8, 4.5))
+    plt.subplots_adjust(left=0.02, right=0.98, top=0.98, bottom=0.00)
+    m = Basemap(projection='robin', lon_0=0, resolution='l')
+    m.drawcoastlines(linewidth=0.1)
+    m.drawcountries(linewidth=0.1)
+    #m.drawmapboundary()
+    m.bluemarble(scale=0.5)
+    m.fillcontinents(color='#C0C0C0', lake_color='#1A4680', zorder=0.1)
+    #x, y = m(lon, lat)
+    size = (alert_num/np.max(alert_num))*200
+    print(size)
+    m.scatter(lon, lat, s=size, label='Alerts Numbers', color='red', latlon=True)
+
+    plt.title('Malicious Internet Traffic Source Map')
+    plt.savefig('world1.png', dpi=150)
+    plt.show()
+
+
 def ip_source_chart_pygal(chart_data):
     """
     Generate bar chart to display ip source numbers
@@ -356,12 +403,13 @@ def reason_type_chart_pygal(chart_data):
     pie_chart.render_to_png('reason_type_pie.png')
 
 
-reason_type_chart_pygal(get_data_by_reasons('alertsbig.db'))
+#reason_type_chart_pygal(get_data_by_reasons('alertsbig.db'))
 ##ip_source_chart_pygal(get_top10_ip("alertsbig.db"))
 #alerts_world_map_via_ip(get_top10_ip("alertsbig.db"))
 #alerts_by_date_chart_pygal(get_alerts_time_reason("alertsbig.db"))
 #uri_counts_by_reason(9, get_uri_by_reason(9, "alertsbig.db"))
 #all_alert_counts_by_reason_24h('alertsbig.db')
+alerts_world_map_via_ip_basemap(get_top10_ip("alertsbig.db"))
 
 # generate 24 chart for all ip and all date
 #alert_counts_by_reason_24h('all', '2018-01-16', '2118-04-04', 'alertsbig.db')
