@@ -10,6 +10,7 @@ from pygal.style import DefaultStyle
 from mpl_toolkits.basemap import Basemap
 import matplotlib.pyplot as plt
 
+DB_NAME = 'alerts.db'
 reason_dict = {1: '隐藏字段篡改', 2: '单选按钮篡改', 3: '链接参数篡改', 4: '未知字段', 5: '未知字段类型', 6: '缓存溢出攻击',
                7: '复选框篡改', 8: 'Cookie篡改', 9: '链接参数篡改', 10: '强制浏览', 11: '非正常HTTP请求', 12: 'HTTP请求方法无效',
                13: '协议错误', 14: '服务器域名无效', 15: '特殊字符'}
@@ -202,20 +203,21 @@ def alert_counts_by_reason_24h(ip_addr, start_date, end_date, db_name):
         line_chart.title = 'Alerts in 24 hours from %s to %s' % (start_date, end_date)
     else:
         line_chart.title = 'Alerts in 24 hours of %s from %s to %s' % (ip_addr, start_date, end_date)
-    line_chart.x_labels = map(str, range(1, 24))
+    line_chart.x_labels = map(str, range(0, 24))
     dict_24hours = {c: [0]*24 for c in range(1, 16)}
     for i in chart_data:
         alert_dt = datetime.datetime.strptime(i[0], "%Y-%m-%dT%H:%M:%S%z")
         reason_code = i[1]
         hour = int(alert_dt.strftime('%H'))
         dict_24hours[reason_code][hour - 1] += 1
+    print(dict_24hours)
     for k in dict_24hours.keys():
         if sum(dict_24hours[k]) == 0:
             continue
         line_chart.add(reason_dict_en[k], dict_24hours[k], show_dots=False)
     line_chart.force_uri_protocol = 'http'
     line_chart.render_to_file('24h_stackedline_chart_%s.svg' % ip_addr)
-    #line_chart.render_to_png('24h_stackedline_chart_%s.png' % ip_addr)
+    line_chart.render_to_png('24h_stackedline_chart_%s.png' % ip_addr)
 
 
 def all_alert_counts_by_reason_24h(db_name):
@@ -242,7 +244,7 @@ def uri_counts_by_reason(reason_code, chart_data):
     for uri_counts in chart_data:
         h_bar.add(uri_counts[0], int(uri_counts[1]))
     h_bar.render_to_file('URI_by_reason_%s.svg' % reason_name)
-    #h_bar.render_to_png('URI_by_reason_%s.png' % reason_name)
+    h_bar.render_to_png('URI_by_reason_%s.png' % reason_name)
 
 
 def alerts_by_reason_in_24h(date, chart_data):
@@ -268,7 +270,7 @@ def alerts_by_reason_in_24h(date, chart_data):
     line_chart.human_readable = True
     line_chart.force_uri_protocol = 'http'
     line_chart.render_to_file('24h_stackedline_chart_%s.svg' % date)
-    #line_chart.render_to_png('24h_stackedline_chart_%s.png' % date)
+    line_chart.render_to_png('24h_stackedline_chart_%s.png' % date)
 
 
 def alerts_by_date_chart_pygal(chart_data):
@@ -298,7 +300,7 @@ def alerts_by_date_chart_pygal(chart_data):
         bar_chart.add(k, alert_dict[k])
         # dt_k = datetime.datetime.strptime(k, '%Y%m%d').date()
         # dateline_chart.add(dt_k, alert_dict[k])
-    #bar_chart.render_to_png('alerts_by_date.png')
+    bar_chart.render_to_png('alerts_by_date.png')
     bar_chart.render_to_file('alerts_by_date.svg')
     # dateline_chart.render_to_png('alerts_by_dateline.png')
     # dateline_chart.render_to_file('alerts_by_dateline.svg')
@@ -324,7 +326,7 @@ def alerts_world_map_via_ip(chart_data):
     worldmap_chart.add('Alerts number', dict_country)
     worldmap_chart.render()
     worldmap_chart.render_to_file("alerts_world_map.svg")
-    #worldmap_chart.render_to_png("alerts_world_map.png")
+    worldmap_chart.render_to_png("alerts_world_map.png")
 
 
 def alerts_world_map_via_ip_basemap(chart_data):
@@ -362,10 +364,9 @@ def alerts_world_map_via_ip_basemap(chart_data):
     m.bluemarble(scale=0.5)
     m.fillcontinents(color='#C0C0C0', lake_color='#1A4680', zorder=0.1)
     #x, y = m(lon, lat)
-    size = (alert_num/np.max(alert_num))*200
+    size = (alert_num/np.max(alert_num))*100
     print(size)
-    m.scatter(lon, lat, s=size, label='Alerts Numbers', color='red', latlon=True)
-
+    m.scatter(lon, lat, s=size, label='Alerts Numbers', color='red', marker='v', zorder=2, latlon=True)
     plt.title('Malicious Internet Traffic Source Map')
     plt.savefig('world1.png', dpi=150)
     plt.show()
@@ -385,7 +386,7 @@ def ip_source_chart_pygal(chart_data):
         bar_chart.add(x_label_name, data[1])
         bar_chart.render()
     bar_chart.render_to_file('ip_source_bar.svg')
-    #bar_chart.render_to_png('ip_source_bar.png')
+    bar_chart.render_to_png('ip_source_bar.png')
 
 
 def reason_type_chart_pygal(chart_data):
@@ -403,14 +404,15 @@ def reason_type_chart_pygal(chart_data):
     pie_chart.render_to_png('reason_type_pie.png')
 
 
-#reason_type_chart_pygal(get_data_by_reasons('alertsbig.db'))
-##ip_source_chart_pygal(get_top10_ip("alertsbig.db"))
-#alerts_world_map_via_ip(get_top10_ip("alertsbig.db"))
-#alerts_by_date_chart_pygal(get_alerts_time_reason("alertsbig.db"))
-#uri_counts_by_reason(9, get_uri_by_reason(9, "alertsbig.db"))
-#all_alert_counts_by_reason_24h('alertsbig.db')
-alerts_world_map_via_ip_basemap(get_top10_ip("alertsbig.db"))
+# reason_type_chart_pygal(get_data_by_reasons(DB_NAME))
+# ip_source_chart_pygal(get_top10_ip(DB_NAME))
+# alerts_world_map_via_ip(get_top10_ip(DB_NAME))
+alerts_by_date_chart_pygal(get_alerts_time_reason(DB_NAME))
+#all_alert_counts_by_reason_24h(DB_NAME)
 
+# alerts_world_map_via_ip_basemap(get_top10_ip(DB_NAME))
+
+#uri_counts_by_reason(9, get_uri_by_reason(9, "alertsbig.db"))
 # generate 24 chart for all ip and all date
 #alert_counts_by_reason_24h('all', '2018-01-16', '2118-04-04', 'alertsbig.db')
 
