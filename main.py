@@ -403,7 +403,7 @@ def reason_type_chart_pygal(chart_data):
 
 
 #reason_type_chart_pygal(get_data_by_reasons('alertsbig.db'))
-##ip_source_chart_pygal(get_top10_ip("alertsbig.db"))
+ip_source_chart_pygal(get_top10_ip("alertsbig.db"))
 #alerts_world_map_via_ip(get_top10_ip("alertsbig.db"))
 #alerts_by_date_chart_pygal(get_alerts_time_reason("alertsbig.db"))
 #uri_counts_by_reason(9, get_uri_by_reason(9, "alertsbig.db"))

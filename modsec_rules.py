@@ -20,7 +20,7 @@ DROP_LIST = set(['REQBODY_ERROR', 'MULTIPART_STRICT_ERROR', 'IP:REPUT_BLOCK_FLAG
 WAITING_LIST = set(['FILES_NAMES', 'REQUEST_BODY', 'TX:MAX_NUM_ARGS', 'TX:ARG_NAME_LENGTH', 'TX:ARG_LENGTH',
                 'TX:TOTAL_ARG_LENGTH', 'TX:MAX_FILE_SIZE', 'COMBINED_FILE_SIZES'])
 COOKIE = 'Cookie'
-db_name = 'alertsbig.db'
+db_name = 'alerts0605.db'
 
 
 def get_all_variable_types(file_name):
@@ -284,6 +284,7 @@ def execute_rule(alert, header, rule, chain=False, matched=[]):
             if v and str(v).endswith(operators[10:]):
                     ret.append('1')
         elif operators == '@ParaPollution':  # handle rule 921170
+            #print('captured parapollution: \n', v, operators)
             if v:
                 counter = Counter(v)
                 for key in counter.keys():
@@ -327,7 +328,7 @@ def parse_variables(alerts, headers, variables):
         else:
             new_vars.append(v)
     real_var = []
-    print('before switch vas are', new_vars)
+    #print('before switch vas are', new_vars)
     if len(new_vars) != 0:
         for v in new_vars:
             if v.lstrip('!&').startswith('REQUEST_HEADERS:'):
@@ -411,7 +412,7 @@ def parse_variables(alerts, headers, variables):
             elif v == 'REQUEST_URI_RAW':
                 if alerts.request_uri_raw:
                     real_var.append(alerts.request_uri_raw)
-    print('return parsed vars are : ', real_var)
+    #print('return parsed vars are : ', real_var)
     return real_var
 
 
@@ -425,7 +426,7 @@ def get_data_from_db(id, db_name):
     """
     if os.path.isfile(db_name) is False:
         return -1
-    pool_size = 10
+    pool_size = 10000
     header_result = defaultdict(lambda: '')
     alerts_result = []
     global data_pool
@@ -455,6 +456,8 @@ def get_data_from_db(id, db_name):
             cookie_list = row[3].strip(';').split(';')
             for cookie in cookie_list:
                 c_list = cookie.strip().split('=')
+                if len(c_list) < 2:
+                    continue
                 cookie_dict[c_list[0]] = c_list[1]
             header_result[row[2]] = cookie_dict
         else:
@@ -493,7 +496,7 @@ def run_rules():
     # try:
     starttime = datetime.datetime.now()
     # get_all_operator_types(ZY_RULE_FILE)
-    start_id = 109975  # 109975
+    start_id = 1  # 109975
     result_file_name = "result_modsecurity1.txt"
     result = []
     global DATA_FILES
@@ -504,12 +507,13 @@ def run_rules():
     cursor = c.execute('select count(*) from alerts ')
     for row in cursor:
         rec_num = row[0]
-    for i in range(start_id, start_id + 10):  # (114791, 114791+1):  # 114791 #54890 ,rec_num+1
+    print('------start running rules from %s' % start_id)
+    for i in range(start_id, rec_num+1):  # (114791, 114791+1):  # 114791 #54890 ,rec_num+1
         i_result = []
         alert, header = get_data(i, db_name)
         # print(alert, header)
         for k in dict_rules.keys():
-            print('\n', i, '#####', k)
+            #print('\n', i, '#####', k)
             rule_result = execute_rule(alert, header, dict_rules[k])  # 930100
             if not rule_result:
                 continue
@@ -554,9 +558,6 @@ def run_rules():
     return result
 
 
-# except Exception as e:
-if __name__ == '__main__':
-    run_rules()
-    #except Exception as e:
-    #    logging.exception(e)
-    #    traceback.print_exc()
+# if __name__ == '__main__':
+#     run_rules()
+
