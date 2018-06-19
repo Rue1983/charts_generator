@@ -195,47 +195,36 @@ def execute_rule(alert, header, rule, chain=False, matched=[]):
     if operators.startswith('!@'):
         is_op_neg = 1
         operators = operators.strip('!')
-    #print('test111 variables', variables)
-    #print('test222 operators', operators)
     if not variables:
         return ret
     for v in variables:
         if operators.startswith('@rx '):
             operators = operators[4:]
             if type(v) == list:
-                #print('----list------type of v is : ', v)
                 for s in v:
                     matchobj = regex.search(r'%s' % operators, str(s))
                     if matchobj or is_op_neg:
                         ret.append(matchobj.group(0))
                         continue
             else:
-                #print('----non------type of v is : ', v)
                 matchobj = regex.search(r'%s' % operators, str(v))
                 if matchobj or is_op_neg:
                     ret.append(matchobj.group(0))
-                    #  print('operator: %s\nv: %s\nmatchobj: %s' % (operators, v, matchobj))
-                    #  print('matched for @rx is :', matchobj.group(0))
                 else:
                     continue
         elif not operators.startswith('@'):
             if operators != '^$' and not v and not is_op_neg:
                 continue
             if type(v) == list:
-                #print('----list------type of v is : ', v)
                 for s in v:
                     matchobj = regex.search(r'%s' % operators, str(s))
                     if matchobj or is_op_neg:
                         ret.append(matchobj.group(0))
                         continue
             else:
-                #print('----non------type of v is : ', v)
                 matchobj = regex.search(r'%s' % operators, str(v))
-                #print(operators, str(v), matchobj)
                 if matchobj or is_op_neg:
                     ret.append(matchobj.group(0))
-                    #print('operator: %s\nv: %s\nmatchobj: %s' % (operators, v, matchobj))
-                    #print('matched for no is :', matchobj.group(0))
                 else:
                     continue
         elif operators.lower().startswith('@pmf'):  # @pmf equal to @pmFromFiles
@@ -243,18 +232,15 @@ def execute_rule(alert, header, rule, chain=False, matched=[]):
                 continue
             file_name = operators.split(' ')[1]
             if type(v) == list:
-                #print('----list------type of v is : ', v)
                 for s in v:
                     for op in DATA_FILES[file_name]:
                         if op in s:
                             ret.append(s)
-                            #print('#################', op, s, file_name)
                             continue
             else:
                 for op in DATA_FILES[file_name]:
                     if op in v:
                         ret.append(v)
-                        #print('#################', op, v, file_name)
                         continue
         elif operators.lower().startswith('@pm'):
             if not v:
@@ -265,7 +251,6 @@ def execute_rule(alert, header, rule, chain=False, matched=[]):
                     ret.append(str(v))
                     continue
         elif operators.startswith('@eq'):
-            #print('captured eq', operators, v)
             if not v:
                 continue
             if (int(operators[4:]) == int(v)) or is_op_neg:
@@ -280,11 +265,9 @@ def execute_rule(alert, header, rule, chain=False, matched=[]):
         elif operators.startswith('@within'):
             pass  # only one rule use it to check allowed http version which is not we care about.
         elif operators.startswith('@endsWith'):
-            #print('captured endsWith', operators, v)
             if v and str(v).endswith(operators[10:]):
                     ret.append('1')
         elif operators == '@ParaPollution':  # handle rule 921170
-            #print('captured parapollution: \n', v, operators)
             if v:
                 counter = Counter(v)
                 for key in counter.keys():

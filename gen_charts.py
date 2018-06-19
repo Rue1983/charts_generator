@@ -14,7 +14,7 @@ import folium
 from folium.plugins import HeatMap
 import logging
 
-DB_NAME = 'alerts0605.db'
+DB_NAME = 'alertsbig.db'
 PIC_DIR = 'pictures/'
 
 reason_dict = {1: '隐藏字段篡改', 2: '单选按钮篡改', 3: '链接参数篡改', 4: '未知字段', 5: '未知字段类型', 6: '缓存溢出攻击',
@@ -65,10 +65,30 @@ def get_upper_limit(data_list):
     return int(ul)
 
 
+def get_distinct_ip_num(db_name):
+    """
+        Get top 10 ip source and alerts counts.
+        :param db_name:
+        :return: number of distinct ip
+        """
+    if os.path.isfile(db_name) is False:
+        raise FileNotFoundError("Can't find given db %s" % db_name)
+    else:
+        result = []
+        conn = sqlite3.connect(db_name)
+        c = conn.cursor()
+        cursor = c.execute('select count(distinct ip) from alerts')
+        for row in cursor:
+            result.append(row[0])
+        conn.close()
+        return result[0]
+
+
 def get_alerts_by_ip(ip, db_name):
     """
     Get top 10 ip source and alerts counts.
     :param db_name:
+    :param ip:
     :return: a list of result
     """
     if os.path.isfile(db_name) is False:
@@ -107,13 +127,13 @@ def get_top10_ip(db_name, start_date=None, end_date=None, limit=10):
         else:
             raise ValueError("Missing Parameter")
         for row in cursor:
-            result.append(row)
+            result.append(list(row))
         #print(result)
         conn.close()
         return result
 
 
-def get_data_by_reasons(db_name):
+def get_data_by_reasons(db_name, cn=None):
     """
     Get counts by alert reasons
     :param db_name:
@@ -127,7 +147,10 @@ def get_data_by_reasons(db_name):
         c = conn.cursor()
         cursor = c.execute("SELECT reason, count(*) from alerts as Reason group by reason order by count(reason) DESC")
         for row in cursor:
-            tmp = [reason_dict_en[row[0]], row[1]]
+            if cn:
+                tmp = [reason_dict[row[0]], row[1]]
+            else:
+                tmp = [reason_dict_en[row[0]], row[1]]
             result.append(tmp)
         return result
 
@@ -219,19 +242,38 @@ def export_all_ip(db_name):
 #export_all_ip('alertsbig.db')
 
 
-def get_location_by_ip(ip):
+def get_location_by_ip(ip, language=None):
     """
     Get country name and city name base on the given ip address
     :param ip:
     :return: (string) cityname, countryname
     """
     reader = geoip2.database.Reader('GeoLite2-City.mmdb')
+    country_name = ''
+    city_name = ''
     try:
         response = reader.city(ip)
     except geoip2.errors.AddressNotFoundError:
         return 'internal', 'internal'
     else:
-        return response.city.name, response.country.name
+        # Handle the situation that country, city missing in response.
+        if response.country.name:
+            if language and language in response.country.names:
+                country_name = response.country.names['%s' % language]
+            else:
+                country_name = response.country.name
+        else:
+            if language and language in response.registered_country.names:
+                country_name = response.registered_country.names['%s' % language]
+            else:
+                country_name = response.registered_country.name
+        if response.city.name:
+            if language and language in response.city.names:
+                print(response)
+                city_name = response.city.names['%s' % language]
+            else:
+                city_name = response.city.name
+    return city_name, country_name
 
 
 def alert_counts_by_reason_24h(ip_addr, start_date, end_date, db_name):
@@ -276,6 +318,30 @@ def all_alert_counts_by_reason_24h(db_name):
     ret = alert_counts_by_reason_24h('all', start_date, end_date, db_name)
     #print(ret)
     return ret
+
+
+def ip_divide_by_country(db_name):
+    num = get_distinct_ip_num(db_name)
+    all_ip = get_top10_ip(db_name, limit=num)
+    foreign = []
+    china = []
+    sum_china = 0
+    sum_foreign = 0
+    for ip in all_ip:
+        city, country = get_location_by_ip(ip[0])
+        if country == 'internal':
+            pass
+        elif country == 'China':
+            china.append(ip)
+            sum_china += ip[1]
+        elif country != 'China':
+            foreign.append(ip)
+            sum_foreign += ip[1]
+        else:
+            raise ValueError("Unexpected country name found!")
+    ret = 'China' if sum_china > sum_foreign else 'Foreign'
+    print('\nchina is ', china, '\n', foreign, '\n', ret)
+    return china, foreign, ret
 
 
 def uri_counts_by_reason(reason_code, chart_data):
@@ -325,9 +391,9 @@ def alerts_by_date_chart_pygal(chart_data):
     """
     Generate chart for alerts counts by day via pygal
     :param chart_data:
-    :return: Create new svg and png chart file in current dir.
+    :return: dict_deviation which contains day:alert numbers of outliers
+                upper_limit which is the upper limit for outliers
     """
-    # dateline_chart = pygal.DateLine(x_label_rotation=25)
     alert_by_date = []
     alert_counts = []
     dict_deviation = {}
@@ -352,21 +418,15 @@ def alerts_by_date_chart_pygal(chart_data):
     #  legend_at_bottom_columns=4,
     bar_chart.title = 'Alerts By Date'
     for k in sorted(alert_dict.keys()):  # Sort by day
-        # dates.append(k)
         alert_counts.append(alert_dict[k])
         bar_chart.add(k, alert_dict[k])
-        # dt_k = datetime.datetime.strptime(k, '%Y%m%d').date()
-        # dateline_chart.add(dt_k, alert_dict[k])
     #bar_chart.render_to_png('%salerts_by_date.png' % PIC_DIR)
     bar_chart.render_to_file('%salerts_by_date.svg' % PIC_DIR)
     bar_chart.show_legend = False
-    #  legend_at_bottom_columns=4,
     bar_chart.title = 'Alerts By Date'  # TODO: update it with begin and end date
     bar_chart.render_to_file('%salerts_by_date_no_legend.svg' % PIC_DIR)
     #bar_chart.render_to_png('%salerts_by_date_no_legend.png' % PIC_DIR)
-    return dict_deviation
-    # dateline_chart.render_to_png('alerts_by_dateline.png')
-    # dateline_chart.render_to_file('alerts_by_dateline.svg')
+    return dict_deviation, upper_limit
 
 
 def alerts_world_map_via_ip(chart_data):
@@ -497,19 +557,19 @@ def reason_type_chart_pygal(chart_data):
 # #alerts_world_map_via_ip(get_top10_ip(DB_NAME))
 #alerts_by_date_chart_pygal(get_alerts_time_reason(DB_NAME))
 # all_alert_counts_by_reason_24h(DB_NAME)
-#alerts_world_map_via_ip_basemap(get_top10_ip('alertsbig.db', limit=500))
+#ip_num = get_distinct_ip_num(DB_NAME)
+#alerts_world_map_via_ip_basemap(get_top10_ip('alertsbig.db', limit=ip_num))
 # uri_counts_by_reason(14, get_uri_by_reason(14, DB_NAME))
-export_all_ip(DB_NAME)
+#export_all_ip(DB_NAME)
 
 
-
+#top_reasons = get_data_by_reasons(DB_NAME, 'cn')
 # generate 24 chart for all ip and all date
 #alert_counts_by_reason_24h('all', '2018-01-16', '2118-04-04', 'alertsbig.db')
 
 #alerts_by_reason_in_24h("20180401", get_alerts_time_reason("alertsbig.db"))
 #get_location_by_ip("218.94.157.126")
 #get_reason_counts_by_date('114.249.227.204', '2018-01-19', '2018-01-20', 'alertsbig.db')
-#get_top10_ip(DB_NAME, '2018-04-10', '2018-04-11')
 
 
 
