@@ -14,7 +14,7 @@ import folium
 from folium.plugins import HeatMap
 import logging
 
-DB_NAME = 'alertsbig.db'
+DB_NAME = 'alerts0614b.db'
 PIC_DIR = 'pictures/'
 
 reason_dict = {1: '隐藏字段篡改', 2: '单选按钮篡改', 3: '链接参数篡改', 4: '未知字段', 5: '未知字段类型', 6: '缓存溢出攻击',
@@ -76,6 +76,7 @@ def get_distinct_ip_num(db_name):
     else:
         result = []
         conn = sqlite3.connect(db_name)
+        conn.text_factory = lambda x: str(x, "utf-8", "ignore")  # to avoid decode error
         c = conn.cursor()
         cursor = c.execute('select count(distinct ip) from alerts')
         for row in cursor:
@@ -96,6 +97,7 @@ def get_alerts_by_ip(ip, db_name):
     else:
         result = []
         conn = sqlite3.connect(db_name)
+        conn.text_factory = lambda x: str(x, "utf-8", "ignore")  # to avoid decode error
         c = conn.cursor()
         cursor = c.execute('SELECT ip, reason, time from alerts where ip = "%s"' % ip)
         for row in cursor:
@@ -117,6 +119,7 @@ def get_top10_ip(db_name, start_date=None, end_date=None, limit=10):
     else:
         result = []
         conn = sqlite3.connect(db_name)
+        conn.text_factory = lambda x: str(x, "utf-8", "ignore")  # to avoid decode error
         c = conn.cursor()
         if start_date and end_date:
             cursor = c.execute("SELECT ip, count(*) from alerts where time between date(\'%s\') and date(\'%s\')"
@@ -144,6 +147,7 @@ def get_data_by_reasons(db_name, cn=None):
     else:
         result = []
         conn = sqlite3.connect(db_name)
+        conn.text_factory = lambda x: str(x, "utf-8", "ignore")  # to avoid decode error
         c = conn.cursor()
         cursor = c.execute("SELECT reason, count(*) from alerts as Reason group by reason order by count(reason) DESC")
         for row in cursor:
@@ -169,6 +173,7 @@ def get_reason_counts_by_date(ip_addr, start_date, end_date, db_name):
     else:
         result = []
         conn = sqlite3.connect(db_name)
+        conn.text_factory = lambda x: str(x, "utf-8", "ignore")  # to avoid decode error
         c = conn.cursor()
         if ip_addr == 'all':
             cursor = c.execute(
@@ -195,6 +200,7 @@ def get_uri_by_reason(reason, db_name):
     else:
         result = []
         conn = sqlite3.connect(db_name)
+        conn.text_factory = lambda x: str(x, "utf-8", "ignore")  # to avoid decode error
         c = conn.cursor()
         cursor = c.execute("SELECT uri, count(*) from alerts where reason = %d group by uri order by count(uri) "
                            "DESC limit 10" % reason)
@@ -209,6 +215,7 @@ def get_alerts_time_reason(db_name):
     else:
         result = []
         conn = sqlite3.connect(db_name)
+        conn.text_factory = lambda x: str(x, "utf-8", "ignore")  # to avoid decode error
         c = conn.cursor()
         cursor = c.execute("SELECT time, reason from alerts")
         for row in cursor:
@@ -227,6 +234,7 @@ def export_all_ip(db_name):
     else:
         result = []
         conn = sqlite3.connect(db_name)
+        conn.text_factory = lambda x: str(x, "utf-8", "ignore")  # to avoid decode error
         c = conn.cursor()
         cursor = c.execute("SELECT ip, count(*) from alerts group by ip order by count(ip) DESC;")
         for row in cursor:
@@ -255,6 +263,9 @@ def get_location_by_ip(ip, language=None):
         response = reader.city(ip)
     except geoip2.errors.AddressNotFoundError:
         return 'internal', 'internal'
+    except ValueError:
+        # it's not a valid ip address
+        pass
     else:
         # Handle the situation that country, city missing in response.
         if response.country.name:

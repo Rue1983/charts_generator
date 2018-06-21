@@ -9,7 +9,7 @@ import sqlite3
 import configparser
 RULE_TYPES = 'rule_types.conf'
 REPORT_TEMPLATE = 'zywaf防护报告模板2.docx'
-DB_NAME = 'alertsbig.db'
+DB_NAME = 'alerts0614b.db'
 
 dict_insert_pic = {'注：攻击类型详细描述见附录': 'reason_type_pie.png', '从本图中可以获知网站遭遇扫描或者黑客攻击':
     'alerts_by_date.png', '前十大攻击源IP分析': 'ip_source_bar.png', '不可信访问24小时时间分布': 'world1.png',

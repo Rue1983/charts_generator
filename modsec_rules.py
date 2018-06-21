@@ -20,7 +20,7 @@ DROP_LIST = set(['REQBODY_ERROR', 'MULTIPART_STRICT_ERROR', 'IP:REPUT_BLOCK_FLAG
 WAITING_LIST = set(['FILES_NAMES', 'REQUEST_BODY', 'TX:MAX_NUM_ARGS', 'TX:ARG_NAME_LENGTH', 'TX:ARG_LENGTH',
                 'TX:TOTAL_ARG_LENGTH', 'TX:MAX_FILE_SIZE', 'COMBINED_FILE_SIZES'])
 COOKIE = 'Cookie'
-db_name = 'alerts0605.db'
+db_name = 'alerts0614b.db'
 
 
 def get_all_variable_types(file_name):
@@ -415,6 +415,7 @@ def get_data_from_db(id, db_name):
     global data_pool
     data_pool = {i: {'alert': '', 'header': ''} for i in range(id, id+pool_size)}
     conn = sqlite3.connect(db_name)
+    conn.text_factory = lambda x: str(x, "utf-8", "ignore")  # to avoid decode error
     c = conn.cursor()
     cursor = c.execute('select id,ip,remoteName,request,status,host,msg '
                        'from alerts where id>=%d and id<%d' % (id, id+pool_size))
@@ -423,7 +424,7 @@ def get_data_from_db(id, db_name):
         request_uri_raw = ''
         matchmsg = re.match(r'\'(https?://.*)\' not allowed', alerts_result[6])
         if matchmsg:
-            request_uri_raw = matchmsg.group(0)
+            request_uri_raw = matchmsg.group(1)
         alerts_result[6] = request_uri_raw
         request_vars = get_vars_from_request(alerts_result[3])
         Alert = namedtuple('Alert', ['id', 'ip', 'remotename', 'request', 'status', 'host',
@@ -449,7 +450,8 @@ def get_data_from_db(id, db_name):
     cursor.close()
     c.close()
     conn.close()
-# get_data_from_db(117777, db_name)
+#get_data_from_db(301000, db_name)
+#print(data_pool)
 # print(data_pool[117777])
 
 
