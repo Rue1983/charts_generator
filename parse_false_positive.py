@@ -7,12 +7,15 @@ import os
 import sqlite3
 import re
 import csv
+import requests
 import regex
 import datetime
+from concurrent.futures import ThreadPoolExecutor
 
 PIC_DIR = 'pictures/'
 DB_NAME = 'alerts0614b.db'
-FALSE_RESPONSE = [403]  # those response code that we need to check if it's false-positive
+FALSE_RESPONSE = set([403])  # those response code that we need to check if it's false-positive
+TRUE_RESPONSE = set([404]) # Those response code that make the url true-positive
 
 
 def get_data_from_db(id, db_name):
@@ -32,7 +35,7 @@ def get_data_from_db(id, db_name):
     conn = sqlite3.connect(db_name)
     conn.text_factory = lambda x: str(x, "utf-8", "ignore")  # to avoid decode error
     c = conn.cursor()
-    cursor = c.execute('select id,host,request,status,msg '
+    cursor = c.execute('select id,host,request,status,msg,reason,method '
                        'from alerts where owasp is null and id>=%d and id<%d ' % (id, id+pool_size))
     for row in cursor:
         alerts_result = list(row)
@@ -46,13 +49,13 @@ def get_data_from_db(id, db_name):
         if match_vars:
             uri = match_vars.group(2)
         alerts_result[2] = uri
-        Alert = namedtuple('Alert', ['id', 'host', 'uri', 'status', 'request_uri_raw'])
+        Alert = namedtuple('Alert', ['id', 'host', 'uri', 'status', 'request_uri_raw', 'reason', 'method'])
         alert = Alert._make(alerts_result)
         data_pool[alert.id]['alert'] = alert
     conn.close()
     #print(data_pool)
 #get_data_from_db(117777, DB_NAME)
-# print(data_pool[117777])
+#print(data_pool[117777])
 
 
 def get_data(id, db_name):
@@ -73,6 +76,61 @@ def get_data(id, db_name):
 # get_data(114791, "alertsbig.db")
 
 
+def get_url_response(url_str, method_code):
+    try:
+        if method_code == 1:
+            r = requests.get(url_str, timeout=6)
+        elif method_code == 2:
+            r = requests.post(url_str, timeout=6)
+        elif method_code == 3:
+            r = requests.put(url_str, timeout=6)
+        elif method_code == 4:
+            r = requests.head(url_str, timeout=6)
+        elif method_code == 5:
+            #TODO: handle trace here but requests does not have trace function
+            return 0
+            pass
+        elif method_code == 6:
+            r = requests.options(url_str, timeout=6)
+        elif method_code == 0:
+            # TODO: handle PROPFIND/Connection here but requests does not have trace function
+            return 0
+            pass
+        else:
+            raise ValueError("Unknown http method number")
+    except requests.exceptions.RequestException as e:
+        print(e)
+        return 0
+    print(r.status_code)
+    r.close()
+    return r.status_code
+    # r = requests.get('https://api.github.com/events')
+    # print(r.status_code)
+#get_url_response('https://api.github.com/events', 5)
+
+
+def check_url_response_concurrently(urls_list):
+    url_sections = []
+    concurrent = 5
+    ret = []
+    while urls_list:
+        url_sections.append(urls_list[:concurrent])
+        del (urls_list[:concurrent])
+    with ThreadPoolExecutor(concurrent) as executor:
+        for url in url_sections:
+            result = []
+            result[0] = executor.submit(get_url_response, url[0])
+            result[1] = executor.submit(get_url_response, url[1])
+            result[2] = executor.submit(get_url_response, url[2])
+            result[3] = executor.submit(get_url_response, url[3])
+            result[4] = executor.submit(get_url_response, url[4])
+            for n, i in enumerate(result):
+                if i in TRUE_RESPONSE:
+                    ret.append(url[n])
+    print(ret)
+    return ret
+
+
 def parse_false_positive(db_name):
     """
     Need to be run after modsec_charts.get_owasp_attack_type() so that owasp column exist in db.
@@ -90,26 +148,45 @@ def parse_false_positive(db_name):
     for row in cursor:
         rec_num = row[0]
     conn.close()
+    true_positive = set()
     for i in range(start_id, rec_num + 1):
         alert = get_data(i, db_name)
         if not alert:
             continue
-        #print('\n', alert)
-        print(alert)
+        print('\n', alert)
         if alert.status not in FALSE_RESPONSE:
             continue
+        elif alert.reason == 12 or alert.reason == 14:
+            # if reason is invalid web server name or method
+            continue
+        elif alert.uri in true_positive:
+            continue
+        if alert.request_uri_raw:
+            response_code = get_url_response(alert.request_uri_raw, alert.method)
+            if response_code in TRUE_RESPONSE:
+                print('-------------catch 404 here')
+                true_positive.add(alert.uri)
+                continue
+        else:
+            #TODO: make url from host and uri here
+            pass
+
         if alert.uri in dict_numbers:
             dict_numbers[alert.uri] += 1
         else:
             dict_numbers[alert.uri] = 1
             dict_result[alert.uri] = alert
     ordered_result = OrderedDict(sorted(dict_numbers.items(), key=lambda t: t[1], reverse=True))
-    print('\n', dict_numbers)
-    print('\n', dict_result)
-    print('\n', ordered_result)
+    #print('\n', dict_numbers)
+   # print('\n', dict_result)
+    #print('\n', ordered_result)
     with open("%sfalse_positive_%s.csv" % (PIC_DIR, db_name[:-3]), 'w', newline='') as csvfile:
         csvwriter = csv.writer(csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
         csvwriter.writerow(["URI", "host", "id", "request", "numbers"])
         for k in ordered_result.keys():
             csvwriter.writerow([k, dict_result[k].host, dict_result[k].id, dict_result[k].request_uri_raw, ordered_result[k]])
+    print(true_positive)
+starttime = datetime.datetime.now()
 parse_false_positive(DB_NAME)
+endtime = datetime.datetime.now()
+print('-----total time cost------', endtime - starttime)
