@@ -1,6 +1,7 @@
 import pygal
 import os
 import sqlite3
+import csv
 import geoip2.database
 import numpy as np
 import datetime
@@ -9,9 +10,12 @@ from collections import Counter
 from pygal.style import DefaultStyle
 from mpl_toolkits.basemap import Basemap
 import matplotlib.pyplot as plt
+import folium
+from folium.plugins import HeatMap
+import logging
 
-DB_NAME = 'alertbak.db'
-PIC_DIR = 'pictures\\'
+DB_NAME = 'alertsbig.db'
+PIC_DIR = 'pictures/'
 reason_dict = {1: '隐藏字段篡改', 2: '单选按钮篡改', 3: '链接参数篡改', 4: '未知字段', 5: '未知字段类型', 6: '缓存溢出攻击',
                7: '复选框篡改', 8: 'Cookie篡改', 9: '链接参数篡改', 10: '强制浏览', 11: '非正常HTTP请求', 12: 'HTTP请求方法无效',
                13: '协议错误', 14: '服务器域名无效', 15: '特殊字符'}
@@ -29,7 +33,7 @@ def get_first_last_date(db_name):
     :return: firstdate, lastdate+1  (to adapt the "between" operator)
     """
     if os.path.isfile(db_name) is False:
-        return -1
+        raise FileNotFoundError("Can't find given db %s" % db_name)
     else:
         result = []
         conn = sqlite3.connect(db_name)
@@ -44,12 +48,13 @@ def get_first_last_date(db_name):
         end_date = datetime.datetime.strptime(str(result[1][0]), "%Y-%m-%dT%H:%M:%S%z") + datetime.timedelta(days=1)
         start_str = start_date.strftime("%Y-%m-%d")
         end_str = end_date.strftime("%Y-%m-%d")
+        conn.close()
         return start_str, end_str
 
 
 def get_upper_limit(data_list):
     """
-    Get upper limit of Tukey‘s test
+    Get upper limit of Tukey‘s test 离群值
     :param data_list:
     :return: int
     """
@@ -66,7 +71,7 @@ def get_alerts_by_ip(ip, db_name):
     :return: a list of result
     """
     if os.path.isfile(db_name) is False:
-        return -1
+        raise FileNotFoundError("Can't find given db %s" % db_name)
     else:
         result = []
         conn = sqlite3.connect(db_name)
@@ -77,21 +82,32 @@ def get_alerts_by_ip(ip, db_name):
         return result
 
 
-def get_top10_ip(db_name):
+def get_top10_ip(db_name, start_date=None, end_date=None, limit=10):
     """
     Get top 10 ip source and alerts counts.
     :param db_name:
+    :param start_date:date in the form of yyyy-mm-dd like 2018-05-01
+    :param end_date: date in the form of yyyy-mm-dd like 2018-05-01
     :return: a list of result
     """
     if os.path.isfile(db_name) is False:
-        return -1
+        raise FileNotFoundError("Can't find given db %s" % db_name)
     else:
         result = []
         conn = sqlite3.connect(db_name)
         c = conn.cursor()
-        cursor = c.execute("SELECT ip, count(*) from alerts as IP group by ip order by count(ip) DESC limit 10")
+        if start_date and end_date:
+            cursor = c.execute("SELECT ip, count(*) from alerts where time between date(\'%s\') and date(\'%s\')"
+                               " group by ip order by count(ip) DESC limit %d" % (start_date, end_date, limit))
+        elif start_date is None and end_date is None:
+            cursor = c.execute("SELECT ip, count(*) from alerts as IP group by ip order by count(ip) DESC limit %d"
+                               % limit)
+        else:
+            raise ValueError("Missing Parameter")
         for row in cursor:
             result.append(row)
+        #print(result)
+        conn.close()
         return result
 
 
@@ -102,7 +118,7 @@ def get_data_by_reasons(db_name):
     :return: A list of reason names and related counts
     """
     if os.path.isfile(db_name) is False:
-        return -1
+        raise FileNotFoundError("Can't find given db %s" % db_name)
     else:
         result = []
         conn = sqlite3.connect(db_name)
@@ -124,7 +140,7 @@ def get_reason_counts_by_date(ip_addr, start_date, end_date, db_name):
     :return:
     """
     if os.path.isfile(db_name) is False:
-        exit(1)
+        raise FileNotFoundError("Can't find given db %s" % db_name)
     else:
         result = []
         conn = sqlite3.connect(db_name)
@@ -150,12 +166,13 @@ def get_uri_by_reason(reason, db_name):
     :return: A list of uri,time,count for one reason in the db
     """
     if os.path.isfile(db_name) is False:
-        return -1
+        raise FileNotFoundError("Can't find given db %s" % db_name)
     else:
         result = []
         conn = sqlite3.connect(db_name)
         c = conn.cursor()
-        cursor = c.execute("SELECT uri, count(*) from alerts where reason = %d group by uri order by count(uri) DESC limit 10" % reason)
+        cursor = c.execute("SELECT uri, count(*) from alerts where reason = %d group by uri order by count(uri) "
+                           "DESC limit 10" % reason)
         for row in cursor:
             result.append(row)
         return result
@@ -163,7 +180,7 @@ def get_uri_by_reason(reason, db_name):
 
 def get_alerts_time_reason(db_name):
     if os.path.isfile(db_name) is False:
-        return -1
+        raise FileNotFoundError("Can't find given db %s" % db_name)
     else:
         result = []
         conn = sqlite3.connect(db_name)
@@ -172,6 +189,32 @@ def get_alerts_time_reason(db_name):
         for row in cursor:
             result.append(row)
         return result
+
+
+def export_all_ip(db_name):
+    """
+    Export all IP source order by numbers into csv file
+    :param db_name: file name of alerts.db
+    :return: none
+    """
+    if os.path.isfile(db_name) is False:
+        raise FileNotFoundError("Can't find given db %s" % db_name)
+    else:
+        result = []
+        conn = sqlite3.connect(db_name)
+        c = conn.cursor()
+        cursor = c.execute("SELECT ip, count(*) from alerts group by ip order by count(ip) DESC;")
+        for row in cursor:
+            byte_list = []
+            for i in row:
+                byte_list.append(str(i))
+            result.append(byte_list)
+        conn.close()
+        with open("%sall_ip_%s.csv" % (PIC_DIR, db_name[:-3]), 'w', newline='') as csvfile:
+            csvwriter = csv.writer(csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
+            for r in result:
+                csvwriter.writerow(r)
+#export_all_ip('alertsbig.db')
 
 
 def get_location_by_ip(ip):
@@ -211,7 +254,7 @@ def alert_counts_by_reason_24h(ip_addr, start_date, end_date, db_name):
         reason_code = i[1]
         hour = int(alert_dt.strftime('%H'))
         dict_24hours[reason_code][hour - 1] += 1
-    print(dict_24hours)
+    #print(dict_24hours)
     for k in dict_24hours.keys():
         if sum(dict_24hours[k]) == 0:
             continue
@@ -296,6 +339,11 @@ def alerts_by_date_chart_pygal(chart_data):
             # print('k is %s' % k)
             dict_deviation[k] = alert_dict[k]
             alerts_by_reason_in_24h(k, chart_data)
+            dt_start = datetime.datetime.strptime(str(k), "%Y%m%d")
+            start_date = dt_start.strftime('%Y-%m-%d')
+            dt_end = dt_start + datetime.timedelta(days=1)
+            end_date = dt_end.strftime('%Y-%m-%d')
+            ip_source_chart_pygal(get_top10_ip(DB_NAME, start_date, end_date), start_date)
     # Display legend at bottom can avoid truncate problem
     bar_chart = pygal.Bar(legend_at_bottom=True, show_legend=True, truncate_legend=-1, human_readable=True)
     #  legend_at_bottom_columns=4,
@@ -347,6 +395,7 @@ def alerts_world_map_via_ip_basemap(chart_data):
     lat = []
     lon = []
     alert_num = []
+    country = 'China'
     for data in chart_data:
         try:
             response = reader.city(data[0])
@@ -360,44 +409,72 @@ def alerts_world_map_via_ip_basemap(chart_data):
             else:
                 tmp = dict_city[loc_ser]
                 dict_city[loc_ser] = int(tmp) + int(data[1])
+            if response.country.name != 'China':
+                country = response.country.name
     for i in dict_city.keys():
         lat.append(float(pickle.loads(i)[0]))
         lon.append(float(pickle.loads(i)[1]))
         alert_num.append(float(dict_city[i]))
-    print(lat, lon, alert_num)
+    #print(lat, lon, alert_num)
+    # data for folium
+    folium_data = []
+    for i, n in enumerate(lat):
+        folium_data.append([lat[i], lon[i], alert_num[i]])
+    #print('test', folium_data)
+    # Draw folium map
+    m = folium.Map(
+        location=[35.5236, 109.49],
+        tiles='OpenStreetMap',
+        zoom_start=4
+    )
+    HeatMap(folium_data).add_to(m)
+    m.save('pictures/folium_wolrd_map.html')
     # Draw map
     fig = plt.figure(figsize=(8, 4.5))
     plt.subplots_adjust(left=0.02, right=0.98, top=0.98, bottom=0.00)
-    m = Basemap(projection='robin', lon_0=0, resolution='l')
+    if country == 'China':
+        pic_name = 'world_china.png'
+        m = Basemap(llcrnrlon=80.33, llcrnrlat=5.01, urcrnrlon=145.16, urcrnrlat=56.123,
+                    resolution='l', projection='cass', lat_0=42.5, lon_0=120)
+    else:
+        pic_name = 'world.png'
+        m = Basemap(projection='robin', lat_0=35, lon_0=110, resolution='l')
+    #ax1 = fig.add_axes([0.1, 0.1, 0.8, 0.8])
     m.drawcoastlines(linewidth=0.1)
     m.drawcountries(linewidth=0.1)
-    #m.drawmapboundary()
-    m.bluemarble(scale=0.5)
-    m.fillcontinents(color='#C0C0C0', lake_color='#1A4680', zorder=0.1)
+    #m.bluemarble(scale=0.5)
+    m.fillcontinents(color='#C0C0C0', lake_color='#A6CAE0', zorder=0.1)#, alpha=0.3)#1A4680
+    m.drawmapboundary(fill_color='#A6CAE0', linewidth=0)
     #x, y = m(lon, lat)
     size = (alert_num/np.max(alert_num))*100
-    print(size)
+    #print(size)
     m.scatter(lon, lat, s=size, label='Alerts Numbers', color='red', marker='o', zorder=2, latlon=True)
     plt.title('Malicious Internet Traffic Source Map')
-    plt.savefig('%sworld.png' % PIC_DIR, dpi=150)
+    plt.savefig('%s%s' % (PIC_DIR, pic_name), dpi=300)
     plt.show()
 
 
-def ip_source_chart_pygal(chart_data):
+def ip_source_chart_pygal(chart_data, date=None):
     """
     Generate bar chart to display ip source numbers
     :param chart_data:
+    :param date: if it is true then chart name is for this day
     :return:
     """
     bar_chart = pygal.Bar(truncate_legend=-1, human_readable=True)
-    bar_chart.title = 'Top 10 IP Source'
+    if date is None:
+        bar_chart.title = 'Top 10 IP Source'
+        file_name = 'ip_source_bar'
+    else:
+        bar_chart.title = 'Top 10 IP Source on %s' % date
+        file_name = 'ip_source_bar_%s' % date
     for data in chart_data:
         city_name, country_name = get_location_by_ip(data[0])
         x_label_name = "%s(%s,%s)" % (data[0], city_name, country_name)
         bar_chart.add(x_label_name, data[1])
         bar_chart.render()
-    bar_chart.render_to_file('%sip_source_bar.svg' % PIC_DIR)
-    bar_chart.render_to_png('%sip_source_bar.png' % PIC_DIR)
+    bar_chart.render_to_file('%s%s.svg' % (PIC_DIR, file_name))
+    bar_chart.render_to_png('%s%s.png' % (PIC_DIR, file_name))
 
 
 def reason_type_chart_pygal(chart_data):
@@ -421,9 +498,10 @@ ip_source_chart_pygal(get_top10_ip(DB_NAME))
 alerts_world_map_via_ip(get_top10_ip(DB_NAME))
 alerts_by_date_chart_pygal(get_alerts_time_reason(DB_NAME))
 all_alert_counts_by_reason_24h(DB_NAME)
-alerts_world_map_via_ip_basemap(get_top10_ip(DB_NAME))
+alerts_world_map_via_ip_basemap(get_top10_ip(DB_NAME, limit=500))
 uri_counts_by_reason(14, get_uri_by_reason(14, DB_NAME))
-
+export_all_ip(DB_NAME)
+#get_top10_ip(DB_NAME, '2018-04-10', '2018-04-11')
 
 # generate 24 chart for all ip and all date
 #alert_counts_by_reason_24h('all', '2018-01-16', '2118-04-04', 'alertsbig.db')
