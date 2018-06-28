@@ -7,9 +7,11 @@ import modsec_rules
 import os
 import sqlite3
 import configparser
+import datetime
+
 RULE_TYPES = 'rule_types.conf'
 REPORT_TEMPLATE = 'zywaf防护报告模板2.docx'
-DB_NAME = 'alerts0614b.db'
+DB_NAME = 'alerts0626.db'
 
 dict_insert_pic = {'注：攻击类型详细描述见附录': 'reason_type_pie.png', '从本图中可以获知网站遭遇扫描或者黑客攻击':
     'alerts_by_date.png', '前十大攻击源IP分析': 'ip_source_bar.png', '不可信访问24小时时间分布': 'world1.png',
@@ -99,22 +101,19 @@ def get_random_sample(db_name, rule_type):
         for row in alerts:
             #print(row)
             result.append(list(row))
-        print('the result is:', result)
+        #print('the result is:', result)
         for sample in result:
             headers = c.execute('select name, value from request_headers where alert_id=%d' % sample[3])
             del (sample[3])
             if not headers:
                 continue
             for row in headers:
-                print('!!!!!!!!!cursor is :', headers)
-                print('\n-------------', sample)
-                print('====', list(row))
                 sample.append(':'.join(row))
         cursor = c.execute('select count(id) from alerts where owasp=%s' % rule_type)
         for row in cursor:
             times = row[0]
         conn.close()
-        print('the result is:', result, '\n times is : %d' % times)
+        #print('the result is:', result, '\n times is : %d' % times)
         return result, times
 #get_random_sample(DB_NAME, 942)
 
@@ -157,11 +156,12 @@ def gen_customer_report(db_name):
         list_24h = list(map(lambda x: x[0] + x[1], zip(list_24h, v)))
     # get upper limit of outlier for daily alert numbers
     upper_limit_24h = gen_charts.get_upper_limit(list_24h)
+    print('----------------Upper limit of 24h: ', upper_limit_24h)
     summit_24h = ''
     for i, num in enumerate(list_24h):
         if num > upper_limit_24h:
             summit_24h += '%d点，' % i
-
+    print('+++++++++++++++list 24h is :', list_24h)
     # get deviation days and generate chart by date
     dict_deviation, upper_limit_days = gen_charts.alerts_by_date_chart_pygal(gen_charts.get_alerts_time_reason(db_name))
 
@@ -173,14 +173,14 @@ def gen_customer_report(db_name):
     result = 0
     report = docx.Document(REPORT_TEMPLATE)
     for para in report.paragraphs:
-        print(para.text)
+        #print(para.text)
         if para.text.startswith('网站日均不可信访问在'):
             summit_days = ''
             multiples = ''
             if dict_deviation:
                 for day in dict_deviation.keys():
                     summit_days += '%s年%s月%s日，' % (day[:4], day[4:6].lstrip('0'), day[6:8].lstrip('0'))
-                    print(dict_deviation[day], upper_limit_days, dict_deviation[day]/upper_limit_days)
+                    #print(dict_deviation[day], upper_limit_days, dict_deviation[day]/upper_limit_days)
                     multiples += '%.1f倍，' % (int(dict_deviation[day])/int(upper_limit_days))
                 para.text = '网站日均不可信访问在%s次以下属于比较正常范围的。超过%s以上疑似遭到漏洞扫描。' \
                             '%s遭受多轮扫描，不可信流量是离群值上限的%s。' % (upper_limit_days, upper_limit_days,
@@ -229,7 +229,10 @@ def gen_customer_report(db_name):
                 raise ValueError("Invalid source region or combination")
             para.text = analysis
         elif para.text.startswith('建议在重要时期重点关注'):
-            para.text = '建议在重要时期重点关注%s左右的恶意扫描和黑客攻击行为。' % rreplace(summit_24h.rstrip('，'), '，', '和', 1)
+            if summit_24h:
+                para.text = '建议在重要时期重点关注%s左右的恶意扫描和黑客攻击行为。' % rreplace(summit_24h.rstrip('，'), '，', '和', 1)
+            else:
+                para.text = ''
         elif para.text.startswith('注：不可信访问类型详细描述见附录'):
             #print(para.text)
             insert_graph_before_para('reason_type_pie.png', para)
@@ -252,9 +255,13 @@ def gen_customer_report(db_name):
             insert_graph_before_para('world.png', para)
             result += 1
         elif para.text.startswith('从24小时的分布图上来看'):
+            print('=============summit 24h is : ', summit_24h)
             #print(para.text)
             insert_graph_before_para('24h_stackedline_chart_all.png', para)
-            analysis = '从24小时的分布图上来看，攻击行为在%s进入高发期。' % summit_24h.rstrip('，')
+            if summit_24h:
+                analysis = '从24小时的分布图上来看，攻击行为在%s进入高发期。' % summit_24h.rstrip('，')
+            else:
+                analysis = ''
             para.text = analysis
             result += 1
 
@@ -294,11 +301,15 @@ def gen_customer_report(db_name):
 
 
 if __name__ == '__main__':
-    #modsec_result = modsec_rules.run_rules()
-    #modsec_charts.owasp_attack_type_waffle(DB_NAME, modsec_result)
-    #modsec_charts.owasp_attack_type_bar(DB_NAME, modsec_result)
+    starttime = datetime.datetime.now()
+
+    modsec_result = modsec_rules.run_rules()
+    modsec_charts.owasp_attack_type_waffle(DB_NAME, modsec_result)
+    modsec_charts.owasp_attack_type_bar(DB_NAME, modsec_result)
     gen_customer_report(DB_NAME)
 
+    endtime = datetime.datetime.now()
+    print('-----total time cost------', endtime - starttime)
     # failed_types = get_owasp_types(DB_NAME)
     # all_types = get_config_sections(RULE_TYPES)
     # all_types = [int(i) for i in all_types]

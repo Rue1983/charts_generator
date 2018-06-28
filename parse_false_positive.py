@@ -13,7 +13,7 @@ import datetime
 from concurrent.futures import ThreadPoolExecutor
 
 PIC_DIR = 'pictures/'
-DB_NAME = 'alerts0614b.db'
+DB_NAME = 'alerts0626.db'
 FALSE_RESPONSE = set([403])  # those response code that we need to check if it's false-positive
 TRUE_RESPONSE = set([404]) # Those response code that make the url true-positive
 

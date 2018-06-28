@@ -8,7 +8,7 @@ import sqlite3
 #import gen_report.DB_NAME as DB_NAME
 import sys
 #sys.path.append("D:\PycharmProjects\pegasus")
-DB_NAME = 'alerts0614b.db'
+DB_NAME = 'alerts0626.db'
 
 
 

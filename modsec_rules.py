@@ -11,7 +11,6 @@ import regex
 import datetime
 
 regex.DEFAULT_VERSION = regex.V1
-#global DATA_FILES
 
 
 ZY_RULE_FILE = "zy_rules_new.conf"  # File we write parsed rules into.
@@ -20,7 +19,7 @@ DROP_LIST = set(['REQBODY_ERROR', 'MULTIPART_STRICT_ERROR', 'IP:REPUT_BLOCK_FLAG
 WAITING_LIST = set(['FILES_NAMES', 'REQUEST_BODY', 'TX:MAX_NUM_ARGS', 'TX:ARG_NAME_LENGTH', 'TX:ARG_LENGTH',
                 'TX:TOTAL_ARG_LENGTH', 'TX:MAX_FILE_SIZE', 'COMBINED_FILE_SIZES'])
 COOKIE = 'Cookie'
-db_name = 'alerts0614b.db'
+db_name = 'alerts0626.db'
 
 
 def get_all_variable_types(file_name):
