@@ -13,7 +13,7 @@ import datetime
 from concurrent.futures import ThreadPoolExecutor
 
 PIC_DIR = 'pictures/'
-DB_NAME = 'alerts0626.db'
+DB_NAME = 'alerts0614b.db'
 FALSE_RESPONSE = set([403])  # those response code that we need to check if it's false-positive
 TRUE_RESPONSE = set([404]) # Those response code that make the url true-positive
 
@@ -76,7 +76,9 @@ def get_data(id, db_name):
 # get_data(114791, "alertsbig.db")
 
 
-def get_url_response(url_str, method_code):
+def get_url_response(url):
+    url_str = url[0]
+    method_code = url[1]
     try:
         if method_code == 1:
             r = requests.get(url_str, timeout=6)
@@ -118,15 +120,18 @@ def check_url_response_concurrently(urls_list):
         del (urls_list[:concurrent])
     with ThreadPoolExecutor(concurrent) as executor:
         for url in url_sections:
-            result = []
-            result[0] = executor.submit(get_url_response, url[0])
-            result[1] = executor.submit(get_url_response, url[1])
-            result[2] = executor.submit(get_url_response, url[2])
-            result[3] = executor.submit(get_url_response, url[3])
-            result[4] = executor.submit(get_url_response, url[4])
-            for n, i in enumerate(result):
-                if i in TRUE_RESPONSE:
-                    ret.append(url[n])
+            if len(url) < 5:
+                for u in url:
+                    tmp = executor.submit(get_url_response, u)
+                    ret.append(tmp.result())
+            else:
+                a = executor.submit(get_url_response, url[0])
+                b = executor.submit(get_url_response, url[1])
+                c = executor.submit(get_url_response, url[2])
+                d = executor.submit(get_url_response, url[3])
+                e = executor.submit(get_url_response, url[4])
+                for i in a, b, c, d, e:
+                    ret.append(i.result())
     print(ret)
     return ret
 
@@ -141,14 +146,16 @@ def parse_false_positive(db_name):
     dict_result = {}
     dict_numbers = {}
     start_id = 1
+    # get alerts data from db and put into pool
     get_data_from_db(start_id, db_name)
+    # get number of records in alerts
     conn = sqlite3.connect(db_name)
     c = conn.cursor()
     cursor = c.execute('select count(*) from alerts ')
     for row in cursor:
         rec_num = row[0]
     conn.close()
-    true_positive = set()
+
     for i in range(start_id, rec_num + 1):
         alert = get_data(i, db_name)
         if not alert:
@@ -156,36 +163,50 @@ def parse_false_positive(db_name):
         print('\n', alert)
         if alert.status not in FALSE_RESPONSE:
             continue
+        # if reason is invalid web server name or method
         elif alert.reason == 12 or alert.reason == 14:
-            # if reason is invalid web server name or method
             continue
-        elif alert.uri in true_positive:
-            continue
-        if alert.request_uri_raw:
-            response_code = get_url_response(alert.request_uri_raw, alert.method)
-            if response_code in TRUE_RESPONSE:
-                print('-------------catch 404 here')
-                true_positive.add(alert.uri)
-                continue
-        else:
-            #TODO: make url from host and uri here
-            pass
+        # if alert.request_uri_raw:
+        #     response_code = get_url_response(alert.request_uri_raw, alert.method)
+        #     if response_code in TRUE_RESPONSE:
+        #         print('-------------catch 404 here')
+        #         true_positive.add(alert.uri)
+        #         continue
+        # else:
+        #     #TODO: make url from host and uri here
+        #     pass
 
         if alert.uri in dict_numbers:
             dict_numbers[alert.uri] += 1
         else:
             dict_numbers[alert.uri] = 1
             dict_result[alert.uri] = alert
+    # sorted dict by descend {uri:number}
     ordered_result = OrderedDict(sorted(dict_numbers.items(), key=lambda t: t[1], reverse=True))
+    ordered_uri = list(ordered_result.keys())
+    # sorted url get from msg or host+uri
+    ordered_url = []
+    for k in ordered_result.keys():
+        if dict_result[k].request_uri_raw:
+            ordered_url.append([dict_result[k].request_uri_raw, dict_result[k].method])
+        else:
+            # TODO: make url from host and uri here, need to determine http or https
+            ordered_url.append(['http://' + dict_result[k].host + dict_result[k].uri, dict_result[k].method])
+    print('====++++==== ordered url is : ', ordered_url)
+    ordered_status = check_url_response_concurrently(ordered_url)
+    print('====++++==== ordered status is : ', ordered_status)
+    for i, status in enumerate(ordered_status):
+        if status in TRUE_RESPONSE:
+            del(ordered_result[ordered_uri[i]])
+            del(dict_result[ordered_uri[i]])
     #print('\n', dict_numbers)
-   # print('\n', dict_result)
+    # print('\n', dict_result)
     #print('\n', ordered_result)
     with open("%sfalse_positive_%s.csv" % (PIC_DIR, db_name[:-3]), 'w', newline='') as csvfile:
         csvwriter = csv.writer(csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
         csvwriter.writerow(["URI", "host", "id", "request", "numbers"])
         for k in ordered_result.keys():
             csvwriter.writerow([k, dict_result[k].host, dict_result[k].id, dict_result[k].request_uri_raw, ordered_result[k]])
-    print(true_positive)
 starttime = datetime.datetime.now()
 parse_false_positive(DB_NAME)
 endtime = datetime.datetime.now()
