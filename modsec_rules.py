@@ -2,6 +2,9 @@ from collections import namedtuple
 from collections import defaultdict
 from collections import OrderedDict
 from collections import Counter
+from timeout import timeout
+import timeout
+import errno
 import logging
 import traceback
 import os
@@ -9,17 +12,21 @@ import sqlite3
 import re
 import regex
 import datetime
+import logging
+import csv
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
 
 regex.DEFAULT_VERSION = regex.V1
-
-
 ZY_RULE_FILE = "zy_rules_new.conf"  # File we write parsed rules into.
 RULES_DIR = "rules"
 DROP_LIST = set(['REQBODY_ERROR', 'MULTIPART_STRICT_ERROR', 'IP:REPUT_BLOCK_FLAG', 'XML:/*', 'RESPONSE_BODY', 'FILES'])
 WAITING_LIST = set(['FILES_NAMES', 'REQUEST_BODY', 'TX:MAX_NUM_ARGS', 'TX:ARG_NAME_LENGTH', 'TX:ARG_LENGTH',
                 'TX:TOTAL_ARG_LENGTH', 'TX:MAX_FILE_SIZE', 'COMBINED_FILE_SIZES'])
 COOKIE = 'Cookie'
-db_name = 'alerts0626.db'
+db_name = 'alerts0709.db'
+PIC_DIR = 'pictures/'
+result_file_name = "%smodsec_result_%s.csv" % (PIC_DIR, db_name[:-3])
 
 
 def get_all_variable_types(file_name):
@@ -36,7 +43,7 @@ def get_all_variable_types(file_name):
                 ret.append(i)
     new_ret = list(set(ret))
     new_ret.sort(key=ret.index)
-    print('%s\n%s' % (new_ret, op))
+    logger.info('%s\n%s' % (new_ret, op))
 
 
 def get_all_operator_types(file_name):
@@ -126,6 +133,10 @@ def get_vars_from_request(request):
     method = ''
     uri = ''
     request_protocol = ''
+    ret = []
+    if request is None:
+        # return empty list if request is None, number should be the same as the normal return.
+        return [''] * 8
     match_vars = re.match(r'(\w+) (.*) (HTTP/\d?.?\d?)$', request)
     if match_vars:
         method = match_vars.group(1)
@@ -173,19 +184,25 @@ def get_vars_from_request(request):
 # get_vars_from_request(request5)
 
 
+@timeout.timeout(10)
 def execute_rule(alert, header, rule, chain=False, matched=[]):
     """
     Make a list of rule result for each variable, and return list lenth, if it's true which means record match the rule.
     :param alert:
     :param header:
     :param rule:
+    :param chain: if it has chain rule
+    :param matched: if chain rule has matched some variables
     :return:
     """
     ret = []
+    logger.debug('Rule is: %s' % rule)
     if chain and matched:
         variables = matched
     else:
         variables = parse_variables(alert, header, rule['variables'])
+        if variables is None:
+            return ret
     operators = rule['oprators']
     operators = operators.strip('"\n\r')
     if operators.endswith('"'):
@@ -293,14 +310,18 @@ def execute_rule(alert, header, rule, chain=False, matched=[]):
 
 def parse_variables(alerts, headers, variables):
     """
-    Parse variables input, remove unsupport and duplicate items, get data for the rest ones and return in a list.
-    :param variable: REQUEST_HEADERS:Range|REQUEST_HEADERS:Request-Range
+    Parse variables input, remove unsupported and duplicate items, get data for the rest ones and return in a list.
+    :param alerts:
+    :param headers:
+    :param variables:
     :return: a list of data
     """
-    #print('parse variables: %s\n%s\n%s\n' % (alerts, headers, variables))
     new_vars = []
     if not isinstance(variables, str):
         raise TypeError('bad operand type')
+    if alerts.reason == 20:
+        # Return none if the alert is just license verification failure.
+        return None
     list_var = variables.split('|')
     list_var.sort()  # Put ! and & items at the beginning
     for v in list_var:
@@ -310,7 +331,6 @@ def parse_variables(alerts, headers, variables):
         else:
             new_vars.append(v)
     real_var = []
-    #print('before switch vas are', new_vars)
     if len(new_vars) != 0:
         for v in new_vars:
             if v.lstrip('!&').startswith('REQUEST_HEADERS:'):
@@ -333,7 +353,6 @@ def parse_variables(alerts, headers, variables):
                 elif not headers[COOKIE]:
                     continue
                 elif v.startswith('!'):
-                    ##print(headers[COOKIE])
                     if headers[COOKIE][cookie_name]:
                         headers[COOKIE].pop(cookie_name)
                 elif v.startswith('&'):
@@ -400,15 +419,15 @@ def parse_variables(alerts, headers, variables):
 
 def get_data_from_db(id, db_name):
     """
-    Get 1000 records from db in range of id : id +999 nd put it into pool
+    Get 10000 records from db in range of id : id +999 nd put it into pool
     :param id:
     :param db_name:
-    :param data_pool:
     :return:
     """
     if os.path.isfile(db_name) is False:
         return -1
     pool_size = 10000
+    logger.info('Getting data from db: from %d to %d' % (id, id + pool_size - 1))
     header_result = defaultdict(lambda: '')
     alerts_result = []
     global data_pool
@@ -416,7 +435,7 @@ def get_data_from_db(id, db_name):
     conn = sqlite3.connect(db_name)
     conn.text_factory = lambda x: str(x, "utf-8", "ignore")  # to avoid decode error
     c = conn.cursor()
-    cursor = c.execute('select id,ip,remoteName,request,status,host,msg '
+    cursor = c.execute('select id,ip,remoteName,request,status,host,msg,reason '
                        'from alerts where id>=%d and id<%d' % (id, id+pool_size))
     for row in cursor:
         alerts_result = list(row)
@@ -426,8 +445,10 @@ def get_data_from_db(id, db_name):
             request_uri_raw = matchmsg.group(1)
         alerts_result[6] = request_uri_raw
         request_vars = get_vars_from_request(alerts_result[3])
-        Alert = namedtuple('Alert', ['id', 'ip', 'remotename', 'request', 'status', 'host',
-                                     'request_uri_raw', 'method', 'args_get', 'args_get_names', 'request_filename',
+        # if request_vars is None:
+        #    logger.error('TypeError found in %s' % alerts_result)
+        Alert = namedtuple('Alert', ['id', 'ip', 'remotename', 'request', 'status', 'host', 'request_uri_raw',
+                                     'reason', 'method', 'args_get', 'args_get_names', 'request_filename',
                                      'request_basename', 'query_string', 'request_protocol', 'uri'])
         alerts_result.extend(request_vars)
         alert = Alert._make(alerts_result)
@@ -458,6 +479,7 @@ def get_data(id, db_name):
     """
     Get all data by id and return 2 list for both alerts and request_headers table
     :param id:
+    :param db_name:
     :return: 2 list
     """
     global data_pool
@@ -476,12 +498,35 @@ def get_data(id, db_name):
 # parse_variables(alert,header,dict_rules['920201'].variables)
 
 
+def write_to_csv(file_content, csv_file, mode):
+    """
+    Write content to specific file with specific mode
+    :param file_content: what you want to write into csv file, iterable items like list
+    :param csv_file: csv file name
+    :param mode: a, w
+    :return:
+    """
+    with open(csv_file, mode, newline='') as csvfile:
+        csv_writer = csv.writer(csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
+        for r in file_content:
+            csv_writer.writerow(r)
+
+
+def read_csv(csv_file=result_file_name):
+    result = []
+    with open(csv_file, newline='') as csvfile:
+        csv_reader = csv.reader(csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
+        print(type(csv_reader))
+        for r in csv_reader:
+            result.append(r)
+    return(result)
+
+
 def run_rules():
     # try:
     starttime = datetime.datetime.now()
     # get_all_operator_types(ZY_RULE_FILE)
     start_id = 1  # 109975
-    result_file_name = "result_modsecurity1.txt"
     result = []
     global DATA_FILES
     dict_rules, DATA_FILES = get_all_rules(ZY_RULE_FILE)
@@ -491,14 +536,22 @@ def run_rules():
     cursor = c.execute('select count(*) from alerts ')
     for row in cursor:
         rec_num = row[0]
-    print('------start running rules from %s' % start_id)
+    logger.info('Start running rules from %s' % start_id)
+    # Remove the old result file before starting
+    # if os.path.exists(result_file_name):
+    #     os.remove(result_file_name)
     for i in range(start_id, rec_num+1):  # (114791, 114791+1):  # 114791 #54890 ,rec_num+1
         i_result = []
         alert, header = get_data(i, db_name)
-        # print(alert, header)
+        logger.debug('Running rules against id: %d' % i)
         for k in dict_rules.keys():
             #print('\n', i, '#####', k)
-            rule_result = execute_rule(alert, header, dict_rules[k])  # 930100
+            try:
+                rule_result = execute_rule(alert, header, dict_rules[k])  # 930100
+            except timeout.TimeoutError:
+                logger.warning("Rule execution timeout captured!!!")
+                continue
+            logger.debug('Rule id is: %s \n result is: %s' % (k, rule_result))
             if not rule_result:
                 continue
             elif 'chain' in dict_rules[k]:
@@ -521,27 +574,23 @@ def run_rules():
                             continue
                     else:
                         i_result.append(k)
-                        # print('+++++ %s chain1 passed' % k)
                         continue
             else:
                 i_result.append(k)  # 930100
-                # print('+++++  %s passed' % k)
         if len(i_result) > 0:
             result.append(i_result)
         else:
             result.append('')
-        # z = open(result_file_name, "a", encoding='UTF-8')
-        # z.write("%s\t%s\t%s\t%s\n" % (i, i_result, alert, header))
-        # z.close()
-    z = open(result_file_name, "a", encoding='UTF-8')
-    z.write('result is : %s' % result)
-    z.close()
-    endtime = datetime.datetime.now()
-    print('result is : %s' % result)
-    print('-----total time cost------', endtime - starttime)
+
+        # Write result into file before it is too big.
+        if len(result) == 10000:
+            write_to_csv(result, result_file_name, 'a')
+            result = []
+    # Write the rest result into csv file
+    write_to_csv(result, result_file_name, 'a')
     return result
 
 
-# if __name__ == '__main__':
-#     run_rules()
+if __name__ == '__main__':
+    run_rules()
 

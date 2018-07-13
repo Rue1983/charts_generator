@@ -13,8 +13,9 @@ import matplotlib.pyplot as plt
 import folium
 from folium.plugins import HeatMap
 import logging
-
-DB_NAME = 'alerts0626.db'
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
+DB_NAME = 'alerts0709.db'
 PIC_DIR = 'pictures/'
 
 reason_dict = {1: '隐藏字段篡改', 2: '单选按钮篡改', 3: '链接参数篡改', 4: '未知字段', 5: '未知字段类型', 6: '缓存溢出攻击',
@@ -151,10 +152,16 @@ def get_data_by_reasons(db_name, cn=None):
         c = conn.cursor()
         cursor = c.execute("SELECT reason, count(*) from alerts as Reason group by reason order by count(reason) DESC")
         for row in cursor:
+            if row[0] == 20:
+                # Skip license error
+                continue
             if cn:
                 tmp = [reason_dict[row[0]], row[1]]
             else:
-                tmp = [reason_dict_en[row[0]], row[1]]
+                try:
+                    tmp = [reason_dict_en[row[0]], row[1]]
+                except KeyError:
+                    print('key error:', row)
             result.append(tmp)
         return result
 
@@ -307,6 +314,9 @@ def alert_counts_by_reason_24h(ip_addr, start_date, end_date, db_name):
     for i in chart_data:
         alert_dt = datetime.datetime.strptime(i[0], "%Y-%m-%dT%H:%M:%S%z")
         reason_code = i[1]
+        if reason_code == 20:
+            # skip the license error
+            continue
         hour = int(alert_dt.strftime('%H'))
         dict_24hours[reason_code][hour - 1] += 1
     for k in dict_24hours.keys():
@@ -315,7 +325,7 @@ def alert_counts_by_reason_24h(ip_addr, start_date, end_date, db_name):
         line_chart.add(reason_dict_en[k], dict_24hours[k], show_dots=False)
     line_chart.force_uri_protocol = 'http'
     line_chart.render_to_file('%s24h_stackedline_chart_%s.svg' % (PIC_DIR, ip_addr))
-    #line_chart.render_to_png('%s24h_stackedline_chart_%s.png' % (PIC_DIR, ip_addr))
+    line_chart.render_to_png('%s24h_stackedline_chart_%s.png' % (PIC_DIR, ip_addr))
     return dict_24hours
 
 
@@ -369,7 +379,7 @@ def uri_counts_by_reason(reason_code, chart_data):
     for uri_counts in chart_data:
         h_bar.add(uri_counts[0], int(uri_counts[1]))
     h_bar.render_to_file('%sURI_by_reason_%s.svg' % (PIC_DIR, reason_name))
-    #h_bar.render_to_png('%sURI_by_reason_%s.png' % (PIC_DIR, reason_name))
+    h_bar.render_to_png('%sURI_by_reason_%s.png' % (PIC_DIR, reason_name))
 
 
 def alerts_by_reason_in_24h(date, chart_data):
@@ -395,7 +405,7 @@ def alerts_by_reason_in_24h(date, chart_data):
     line_chart.human_readable = True
     line_chart.force_uri_protocol = 'http'
     line_chart.render_to_file('%s24h_stackedline_chart_%s.svg' % (PIC_DIR, date))
-    #line_chart.render_to_png('%s24h_stackedline_chart_%s.png' % (PIC_DIR, date))
+    line_chart.render_to_png('%s24h_stackedline_chart_%s.png' % (PIC_DIR, date))
 
 
 def alerts_by_date_chart_pygal(chart_data):
@@ -431,12 +441,12 @@ def alerts_by_date_chart_pygal(chart_data):
     for k in sorted(alert_dict.keys()):  # Sort by day
         alert_counts.append(alert_dict[k])
         bar_chart.add(k, alert_dict[k])
-    #bar_chart.render_to_png('%salerts_by_date.png' % PIC_DIR)
+    bar_chart.render_to_png('%salerts_by_date.png' % PIC_DIR)
     bar_chart.render_to_file('%salerts_by_date.svg' % PIC_DIR)
     bar_chart.show_legend = False
     bar_chart.title = 'Alerts By Date'  # TODO: update it with begin and end date
     bar_chart.render_to_file('%salerts_by_date_no_legend.svg' % PIC_DIR)
-    #bar_chart.render_to_png('%salerts_by_date_no_legend.png' % PIC_DIR)
+    bar_chart.render_to_png('%salerts_by_date_no_legend.png' % PIC_DIR)
     return dict_deviation, upper_limit
 
 
@@ -460,7 +470,7 @@ def alerts_world_map_via_ip(chart_data):
     worldmap_chart.add('Alerts number', dict_country)
     worldmap_chart.render()
     worldmap_chart.render_to_file("%salerts_world_map.svg" % PIC_DIR)
-    #worldmap_chart.render_to_png("%salerts_world_map.png" % PIC_DIR)
+    worldmap_chart.render_to_png("%salerts_world_map.png" % PIC_DIR)
 
 
 def alerts_world_map_via_ip_basemap(chart_data):
@@ -539,12 +549,14 @@ def ip_source_chart_pygal(chart_data, date=None):
         bar_chart.title = 'Top 10 IP Source on %s' % date
         file_name = 'ip_source_bar_%s' % date
     for data in chart_data:
+        if data[0] is None:
+            continue
         city_name, country_name = get_location_by_ip(data[0])
         x_label_name = "%s(%s,%s)" % (data[0], city_name, country_name)
         bar_chart.add(x_label_name, data[1])
         bar_chart.render()
     bar_chart.render_to_file('%s%s.svg' % (PIC_DIR, file_name))
-    #bar_chart.render_to_png('%s%s.png' % (PIC_DIR, file_name))
+    bar_chart.render_to_png('%s%s.png' % (PIC_DIR, file_name))
 
 
 def reason_type_chart_pygal(chart_data):
@@ -559,19 +571,19 @@ def reason_type_chart_pygal(chart_data):
         value_font_family='googlefont:Raleway',
         value_font_size=30,
         value_colors=('white',) * 15)
-    #pie_chart.render_to_png('%sreason_type_pie.png' % PIC_DIR)
+    pie_chart.render_to_png('%sreason_type_pie.png' % PIC_DIR)
     pie_chart.render_to_file('%sreason_type_pie.svg' % PIC_DIR)
 
 
 # reason_type_chart_pygal(get_data_by_reasons(DB_NAME))
 # ip_source_chart_pygal(get_top10_ip(DB_NAME))
 # #alerts_world_map_via_ip(get_top10_ip(DB_NAME))
-#alerts_by_date_chart_pygal(get_alerts_time_reason(DB_NAME))
+# alerts_by_date_chart_pygal(get_alerts_time_reason(DB_NAME))
 # all_alert_counts_by_reason_24h(DB_NAME)
-#ip_num = get_distinct_ip_num(DB_NAME)
-#alerts_world_map_via_ip_basemap(get_top10_ip('alertsbig.db', limit=ip_num))
+# ip_num = get_distinct_ip_num(DB_NAME)
+# alerts_world_map_via_ip_basemap(get_top10_ip(DB_NAME, limit=ip_num))
 # uri_counts_by_reason(14, get_uri_by_reason(14, DB_NAME))
-#export_all_ip(DB_NAME)
+# export_all_ip(DB_NAME)
 
 
 #top_reasons = get_data_by_reasons(DB_NAME, 'cn')

@@ -8,10 +8,13 @@ import os
 import sqlite3
 import configparser
 import datetime
+import logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
 
 RULE_TYPES = 'rule_types.conf'
 REPORT_TEMPLATE = 'zywaf防护报告模板2.docx'
-DB_NAME = 'alerts0626.db'
+DB_NAME = 'alerts0709.db'
 
 dict_insert_pic = {'注：攻击类型详细描述见附录': 'reason_type_pie.png', '从本图中可以获知网站遭遇扫描或者黑客攻击':
     'alerts_by_date.png', '前十大攻击源IP分析': 'ip_source_bar.png', '不可信访问24小时时间分布': 'world1.png',
@@ -63,7 +66,7 @@ def get_owasp_types(db_name):
             if row[0] is not None:
                 result.append(row[0])
         conn.close()
-        print(result)
+        logger.info(result)
         return result
 #get_owasp_types('alertsbig.db')
 
@@ -80,6 +83,7 @@ def get_majority(input_list):
         if tmp >= total / 2:
             majority_ret = input_list[:i + 1]
             break
+    logger.info('Majority of given list %s is %s' % (input_list, majority_ret))
     return majority_ret
 
 
@@ -156,12 +160,12 @@ def gen_customer_report(db_name):
         list_24h = list(map(lambda x: x[0] + x[1], zip(list_24h, v)))
     # get upper limit of outlier for daily alert numbers
     upper_limit_24h = gen_charts.get_upper_limit(list_24h)
-    print('----------------Upper limit of 24h: ', upper_limit_24h)
+    logger.info('Upper limit of 24h is: %s' % upper_limit_24h)
     summit_24h = ''
     for i, num in enumerate(list_24h):
         if num > upper_limit_24h:
             summit_24h += '%d点，' % i
-    print('+++++++++++++++list 24h is :', list_24h)
+    logger.info('Summit of 24h is: %s' % summit_24h)
     # get deviation days and generate chart by date
     dict_deviation, upper_limit_days = gen_charts.alerts_by_date_chart_pygal(gen_charts.get_alerts_time_reason(db_name))
 
@@ -169,6 +173,7 @@ def gen_customer_report(db_name):
     top_reasons = gen_charts.get_data_by_reasons(DB_NAME, 'cn')
     reason_majority = get_majority(top_reasons)
 
+    logger.info('Starting to update customer report base on the template...')
     # start to update customer report
     result = 0
     report = docx.Document(REPORT_TEMPLATE)
@@ -234,11 +239,9 @@ def gen_customer_report(db_name):
             else:
                 para.text = ''
         elif para.text.startswith('注：不可信访问类型详细描述见附录'):
-            #print(para.text)
             insert_graph_before_para('reason_type_pie.png', para)
             result += 1
         elif para.text.startswith('前十大攻击源IP分析'):
-            #print(para.text)
             insert_graph_before_para('ip_source_bar.png', para)
             result += 1
         elif para.text.startswith('从上图中可以获知网站遭遇扫描或者黑客攻击的高发日期为'):
@@ -252,11 +255,12 @@ def gen_customer_report(db_name):
             para.text = summit_days
             result += 1
         elif para.text.startswith('不可信访问24小时时间分布'):
-            insert_graph_before_para('world.png', para)
+            if os.path.exists('world.png'):
+                insert_graph_before_para('world.png', para)
+            else:
+                insert_graph_before_para('world_china.png', para)
             result += 1
         elif para.text.startswith('从24小时的分布图上来看'):
-            print('=============summit 24h is : ', summit_24h)
-            #print(para.text)
             insert_graph_before_para('24h_stackedline_chart_all.png', para)
             if summit_24h:
                 analysis = '从24小时的分布图上来看，攻击行为在%s进入高发期。' % summit_24h.rstrip('，')
@@ -265,6 +269,7 @@ def gen_customer_report(db_name):
             para.text = analysis
             result += 1
 
+    logger.info('Starting to generate analysis for chapter 4.3...')
     # Insert samples in chapter 4.3
     failed_types = get_owasp_types(db_name)
     all_types = get_config_sections(RULE_TYPES)
@@ -302,14 +307,14 @@ def gen_customer_report(db_name):
 
 if __name__ == '__main__':
     starttime = datetime.datetime.now()
-
-    modsec_result = modsec_rules.run_rules()
-    modsec_charts.owasp_attack_type_waffle(DB_NAME, modsec_result)
-    modsec_charts.owasp_attack_type_bar(DB_NAME, modsec_result)
+    #modsec_rules.run_rules()
+    #modsec_result = modsec_rules.read_csv()
+    #modsec_charts.owasp_attack_type_waffle(DB_NAME, modsec_result)
+    #modsec_charts.owasp_attack_type_bar(DB_NAME, modsec_result)
     gen_customer_report(DB_NAME)
 
     endtime = datetime.datetime.now()
-    print('-----total time cost------', endtime - starttime)
+    print('-----total time cost------:', endtime - starttime)
     # failed_types = get_owasp_types(DB_NAME)
     # all_types = get_config_sections(RULE_TYPES)
     # all_types = [int(i) for i in all_types]
