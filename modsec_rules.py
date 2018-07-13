@@ -24,7 +24,7 @@ DROP_LIST = set(['REQBODY_ERROR', 'MULTIPART_STRICT_ERROR', 'IP:REPUT_BLOCK_FLAG
 WAITING_LIST = set(['FILES_NAMES', 'REQUEST_BODY', 'TX:MAX_NUM_ARGS', 'TX:ARG_NAME_LENGTH', 'TX:ARG_LENGTH',
                 'TX:TOTAL_ARG_LENGTH', 'TX:MAX_FILE_SIZE', 'COMBINED_FILE_SIZES'])
 COOKIE = 'Cookie'
-db_name = 'alerts0709.db'
+db_name = 'alerts0713.db'
 PIC_DIR = 'pictures/'
 result_file_name = "%smodsec_result_%s.csv" % (PIC_DIR, db_name[:-3])
 
