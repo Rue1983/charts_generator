@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 RULE_TYPES = 'rule_types.conf'
 REPORT_TEMPLATE = 'zywaf防护报告模板2.docx'
-DB_NAME = 'alerts0713.db'
+DB_NAME = 'alerts0827no.db'
 
 dict_insert_pic = {'注：攻击类型详细描述见附录': 'reason_type_pie.png', '从本图中可以获知网站遭遇扫描或者黑客攻击':
     'alerts_by_date.png', '前十大攻击源IP分析': 'ip_source_bar.png', '不可信访问24小时时间分布': 'world1.png',
@@ -60,6 +60,7 @@ def get_owasp_types(db_name):
     else:
         result = []
         conn = sqlite3.connect(db_name)
+        conn.text_factory = lambda x: str(x, "utf-8", "ignore")  # to avoid decode error
         c = conn.cursor()
         cursor = c.execute('SELECT DISTINCT owasp FROM alerts;')
         for row in cursor:
@@ -100,6 +101,7 @@ def get_random_sample(db_name, rule_type):
         result = []
         times = 0
         conn = sqlite3.connect(db_name)
+        conn.text_factory = lambda x: str(x, "utf-8", "ignore")  # to avoid decode error
         c = conn.cursor()
         alerts = c.execute('select ip,time,request,id from alerts where owasp=%s ORDER by random() limit 3' % rule_type)
         for row in alerts:
@@ -120,6 +122,43 @@ def get_random_sample(db_name, rule_type):
         #print('the result is:', result, '\n times is : %d' % times)
         return result, times
 #get_random_sample(DB_NAME, 942)
+
+
+def get_sum_and_average(db_name, start_date=None, end_date=None):
+    """
+    Get top 10 ip source and alerts counts.
+    :param db_name:
+    :param start_date:date in the form of yyyy-mm-dd like 2018-05-01
+    :param end_date: date in the form of yyyy-mm-dd like 2018-05-01
+    :return: a list of result
+    """
+    if os.path.isfile(db_name) is False:
+        raise FileNotFoundError("Can't find given db %s" % db_name)
+    else:
+        conn = sqlite3.connect(db_name)
+        conn.text_factory = lambda x: str(x, "utf-8", "ignore")  # to avoid decode error
+        c = conn.cursor()
+        if start_date is None and end_date is None:
+            cursor = c.execute("SELECT time from alerts limit 1")
+            for row in cursor:
+                start_date = str(row[0])[:10]
+            cursor = c.execute("SELECT time from alerts order by id DESC limit 1")
+            for row in cursor:
+                end_date = str(row[0])[:10]
+        else:
+            raise ValueError("Missing Parameter")
+        cursor = c.execute("SELECT count(*) from alerts where time between date(\'%s\') and date(\'%s\')"
+                           % (start_date, end_date))
+        for row in cursor:
+            total_number = int(row[0])
+        date_delta = (datetime.datetime.strptime(end_date, "%Y-%m-%d") -
+                      datetime.datetime.strptime(start_date, "%Y-%m-%d")).days
+        average_daily = int(total_number / date_delta)
+        print("---------start date is: %s \n end date is: %s \n total number is: %d \n average is: %d \n days is: %d" %
+              (start_date, end_date, total_number, average_daily, date_delta))
+        conn.close()
+        return total_number, average_daily
+
 
 
 def get_config_value(file_name, section, key):
@@ -196,6 +235,9 @@ def gen_customer_report(db_name):
             for r in reason_majority:
                 analysis += '“%s”，' % r[0]
             para.text = '报告中%s数量居多，说明' % rreplace(analysis.rstrip('，'), '，', '和', 1)
+        elif para.text.startswith('防护采样周期内网站不可信访问总数为'):
+            total_number, average_daily = get_sum_and_average(DB_NAME)
+            para.text = '防护采样周期内网站不可信访问总数为%d次，日均%d次。' % (total_number, average_daily)
         elif para.text.startswith('从攻击IP地址分析上看，绝大部分的异常流量来自于'):
             china, foreign, major_area = gen_charts.ip_divide_by_country(DB_NAME)
             analysis = ''
@@ -221,6 +263,7 @@ def gen_customer_report(db_name):
                     else:
                         country_foreign[country_name] = i[1]
                 analysis_foreign = '分布于%s' % rreplace('，'.join(country_foreign.keys()), '，', '和', 1)
+            print(major_area, analysis_china)
             if major_area == 'China' and analysis_foreign:
                 analysis = '从攻击IP地址分析上看，绝大部分的异常流量来自于国内，主要%s。来自国外的流量主要%s。建议将频繁对' \
                            '网站进行不符合安全模型的行为的IP地址配置在IP黑名单中。' % (analysis_china, analysis_foreign)
@@ -229,9 +272,10 @@ def gen_customer_report(db_name):
                            '网站进行不符合安全模型的行为的IP地址配置在IP黑名单中。' % (analysis_foreign, analysis_china)
             elif major_area == 'China' and not analysis_foreign:
                 analysis = '从攻击IP地址分析上看，绝大部分的异常流量来自于国内，主要%s。建议将频繁对' \
-                           '网站进行不符合安全模型的行为的IP地址配置在IP黑名单中。' % analysis_foreign
+                           '网站进行不符合安全模型的行为的IP地址配置在IP黑名单中。' % analysis_china
             else:
-                raise ValueError("Invalid source region or combination")
+                logger.warning("Invalid source region or combination")
+                analysis = '攻击地址来源分布异常，可能都是来自于内网。'
             para.text = analysis
         elif para.text.startswith('建议在重要时期重点关注'):
             if summit_24h:
@@ -255,7 +299,7 @@ def gen_customer_report(db_name):
             para.text = summit_days
             result += 1
         elif para.text.startswith('不可信访问24小时时间分布'):
-            if os.path.exists('world.png'):
+            if os.path.exists('pictures\world.png'):
                 insert_graph_before_para('world.png', para)
             else:
                 insert_graph_before_para('world_china.png', para)
@@ -312,9 +356,9 @@ if __name__ == '__main__':
     #modsec_charts.owasp_attack_type_waffle(DB_NAME, modsec_result)
     #modsec_charts.owasp_attack_type_bar(DB_NAME, modsec_result)
     gen_customer_report(DB_NAME)
-
     endtime = datetime.datetime.now()
     print('-----total time cost------:', endtime - starttime)
+
     # failed_types = get_owasp_types(DB_NAME)
     # all_types = get_config_sections(RULE_TYPES)
     # all_types = [int(i) for i in all_types]

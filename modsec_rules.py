@@ -24,7 +24,7 @@ DROP_LIST = set(['REQBODY_ERROR', 'MULTIPART_STRICT_ERROR', 'IP:REPUT_BLOCK_FLAG
 WAITING_LIST = set(['FILES_NAMES', 'REQUEST_BODY', 'TX:MAX_NUM_ARGS', 'TX:ARG_NAME_LENGTH', 'TX:ARG_LENGTH',
                 'TX:TOTAL_ARG_LENGTH', 'TX:MAX_FILE_SIZE', 'COMBINED_FILE_SIZES'])
 COOKIE = 'Cookie'
-db_name = 'alerts0713.db'
+db_name = 'alerts0827no.db'
 PIC_DIR = 'pictures/'
 result_file_name = "%smodsec_result_%s.csv" % (PIC_DIR, db_name[:-3])
 
@@ -184,7 +184,7 @@ def get_vars_from_request(request):
 # get_vars_from_request(request5)
 
 
-@timeout.timeout(10)
+@timeout.timeout(15)
 def execute_rule(alert, header, rule, chain=False, matched=[]):
     """
     Make a list of rule result for each variable, and return list lenth, if it's true which means record match the rule.
@@ -522,25 +522,49 @@ def read_csv(csv_file=result_file_name):
     return(result)
 
 
+def get_record_number(db_name):
+    """
+    Return the number of all records
+    :param db_name:
+    :return: record numbers(int)
+    """
+    conn = sqlite3.connect(db_name)
+    c = conn.cursor()
+    cursor = c.execute('select count(*) from alerts')
+    for row in cursor:
+        rec_num = row[0]
+        return rec_num
+
+
+def get_first_id(db_name):
+    """
+    Return the id number of the first record in alerts table
+    :param db_name:
+    :return: id numbers(int)
+    """
+    conn = sqlite3.connect(db_name)
+    c = conn.cursor()
+    cursor = c.execute('select id from alerts limit 1')
+    for row in cursor:
+        rec_num = row[0]
+        return int(rec_num)
+
+
 def run_rules():
     # try:
     starttime = datetime.datetime.now()
     # get_all_operator_types(ZY_RULE_FILE)
-    start_id = 1  # 109975
+    start_id = get_first_id(db_name)  # 109975
     result = []
     global DATA_FILES
     dict_rules, DATA_FILES = get_all_rules(ZY_RULE_FILE)
     get_data_from_db(start_id, db_name)
-    conn = sqlite3.connect(db_name)
-    c = conn.cursor()
-    cursor = c.execute('select count(*) from alerts ')
-    for row in cursor:
-        rec_num = row[0]
+    rec_num = get_record_number(db_name)
     logger.info('Start running rules from %s' % start_id)
     # Remove the old result file before starting
     # if os.path.exists(result_file_name):
     #     os.remove(result_file_name)
-    for i in range(start_id, rec_num+1):  # (114791, 114791+1):  # 114791 #54890 ,rec_num+1
+    for i in range(start_id, rec_num+start_id):  # (114791, 114791+1):  # 114791 #54890 ,rec_num+1
         i_result = []
         alert, header = get_data(i, db_name)
         logger.debug('Running rules against id: %d' % i)
@@ -591,6 +615,6 @@ def run_rules():
     return result
 
 
-if __name__ == '__main__':
-    run_rules()
+# if __name__ == '__main__':
+#     run_rules()
 

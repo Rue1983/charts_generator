@@ -8,7 +8,7 @@ import logging
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
-DB_NAME = 'alerts0713.db'
+DB_NAME = 'alerts0827.db'
 
 # result = ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ['920230', '942431', '942432'], ['920230', '942430', '942431', '942432'], ['920230', '942430', '942431', '942432'], '', ['920230', '942430', '942431', '942432'], '', '', '', '', '', '', ['920230', '942430', '942431', '942432'], ['920230', '942431', '942432'], ['920230', '942430', '942431', '942432'], '', '', '', '', '', '', '', '', '', '', '', '', '', '', ['920230', '942430', '942431', '942432'], '', '', '', '', '', '', ['920230', '942430', '942431', '942432'], ['920230', '942430', '942431', '942432'], ['920230', '942430', '942431', '942432'], ['920230', '942430', '942431', '942432'], '', '', '', '', ['920230', '942430', '942431', '942432'], '']
 dict_rulename = {913: 'Scanner Detection', 920: 'Protocol Enforcement', 921: 'Protocol Attack',
@@ -65,6 +65,7 @@ def update_db(db_name, table_name, col_name, rec_id, value):
 
 def get_owasp_attack_type(db_name, list_input):
     # print('list input is ', list_input)
+    start_id = 1  # 1 by default
     add_owasp_column(db_name)
     ret = {913: 0, 920: 0, 921: 0, 930: 0, 931: 0, 932: 0, 933: 0, 941: 0, 942: 0, 943: 0, 950: 0}
     for i, r in enumerate(list_input):
@@ -74,7 +75,7 @@ def get_owasp_attack_type(db_name, list_input):
             attack_type = int(classify(r))
             # print(attack_type)
             ret[attack_type] = ret[attack_type] + 1
-            update_db(db_name, 'alerts', 'owasp', i + 1, attack_type)
+            #update_db(db_name, 'alerts', 'owasp', i + start_id, attack_type)
     ret = {key: ret[key] for key in ret.keys() if ret[key]}
     # print(ret)
     return ret

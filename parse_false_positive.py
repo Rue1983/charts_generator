@@ -107,7 +107,7 @@ def get_url_response(url):
     except requests.exceptions.RequestException as e:
         print(e)
         return 0
-    print(r.status_code)
+    #print(r.status_code)
     r.close()
     return r.status_code
     # r = requests.get('https://api.github.com/events')
@@ -136,7 +136,7 @@ def check_url_response_concurrently(urls_list):
                 e = executor.submit(get_url_response, url[4])
                 for i in a, b, c, d, e:
                     ret.append(i.result())
-    print(ret)
+    #print(ret)
     return ret
 
 
@@ -154,6 +154,7 @@ def parse_false_positive(db_name):
     get_data_from_db(start_id, db_name)
     # get number of records in alerts
     conn = sqlite3.connect(db_name)
+    conn.text_factory = lambda x: str(x, "utf-8", "ignore")  # to avoid decode error
     c = conn.cursor()
     cursor = c.execute('select count(*) from alerts ')
     for row in cursor:

@@ -12,10 +12,14 @@ from mpl_toolkits.basemap import Basemap
 import matplotlib.pyplot as plt
 import folium
 from folium.plugins import HeatMap
+import modsec_rules
+from timeout import timeit
 import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
-DB_NAME = 'alerts0713.db'
+
+
+DB_NAME = 'alerts0827no.db'
 PIC_DIR = 'pictures/'
 
 reason_dict = {1: '隐藏字段篡改', 2: '单选按钮篡改', 3: '链接参数篡改', 4: '未知字段', 5: '未知字段类型', 6: '缓存溢出攻击',
@@ -26,6 +30,20 @@ reason_dict_en = {1: 'Hidden Field Tampering', 2: 'Radio Button Tampering', 3: '
                   8: 'Cookie Tampering', 9: 'Link Tampering', 10: 'Forceful Browsing', 11: 'Malformed Request',
                   12: 'Invalid HTTP Method', 13: 'Incorrect Protocol', 14: 'Invalid Web Server Name',
                   15: 'Special Characters'}
+
+
+def is_valid_ip(ip_address):
+    """
+    Check if input string is a valid ip address;
+    :param ip_address:
+    :return:
+    """
+    import socket
+    try:
+        socket.inet_aton(ip_address)
+        return True
+    except socket.error:
+        return False
 
 
 def get_first_last_date(db_name):
@@ -39,6 +57,7 @@ def get_first_last_date(db_name):
     else:
         result = []
         conn = sqlite3.connect(db_name)
+        conn.text_factory = lambda x: str(x, "utf-8", "ignore")  # to avoid decode error
         c = conn.cursor()
         cursor = c.execute('select time from alerts order by time limit 1')
         for row in cursor:
@@ -132,7 +151,6 @@ def get_top10_ip(db_name, start_date=None, end_date=None, limit=10):
             raise ValueError("Missing Parameter")
         for row in cursor:
             result.append(list(row))
-        #print(result)
         conn.close()
         return result
 
@@ -294,6 +312,60 @@ def get_location_by_ip(ip, language=None):
     return city_name, country_name
 
 
+@timeit
+def get_real_ip(db_name):
+    """
+    Get real ip from request_headers x-forwarded-for field the return as dict
+    :param db_name:
+    :return:  dict contains alert_id:real ip
+    """
+    """
+        Get top 10 ip source and alerts counts.
+        :param db_name:
+        :return: number of distinct ip
+        """
+    if os.path.isfile(db_name) is False:
+        raise FileNotFoundError("Can't find given db %s" % db_name)
+    else:
+        result = {}
+        conn = sqlite3.connect(db_name)
+        conn.text_factory = lambda x: str(x, "utf-8", "ignore")  # to avoid decode error
+        c = conn.cursor()
+        cursor = c.execute('select alert_id,value from request_headers where name="X-Forwarded-For"')
+        for row in cursor:
+            first_ip = row[1].split(',')[0]
+            country_name, city_name = get_location_by_ip(first_ip)
+            if is_valid_ip(first_ip) is False:  # remove invalid ip
+                continue
+            if country_name == 'internal' or not country_name:  # remove internal ip
+                continue
+            result[row[0]] = row[1]
+        conn.close()
+        print(result)
+        return result
+#get_real_ip(DB_NAME)
+
+
+#@timeit
+def update_ip_by_xff(db_name):
+    """
+    Use ip in x-forward-for to update ip in alerts db
+    :param db_name:
+    :return:
+    """
+    real_ip = get_real_ip(db_name)
+    conn = sqlite3.connect(db_name)
+    c = conn.cursor()
+    for alert_id, ip in real_ip.items():
+        try:
+            cursor = c.execute('update %s set %s = "%s" where id =%s;' % ("alerts", "ip", ip, alert_id))
+        except sqlite3.OperationalError as e:
+            print(alert_id, '=========', ip)
+            print(e)
+    conn.commit()
+    conn.close()
+
+
 def alert_counts_by_reason_24h(ip_addr, start_date, end_date, db_name):
     """
     Generate chart for reasons counts in 24h for a specific ip
@@ -368,9 +440,9 @@ def ip_divide_by_country(db_name):
 def uri_counts_by_reason(reason_code, chart_data):
     """
     Generate chart for specific reason to show the affected numbers
-    :param reason_code: 
-    :param chart_data: 
-    :return: 
+    :param reason_code:
+    :param chart_data:
+    :return:
     """
     reason_name = reason_dict_en[reason_code]
     h_bar = pygal.HorizontalBar(truncate_legend=-1, human_readable=True, legend_at_bottom=True,
@@ -496,9 +568,14 @@ def alerts_world_map_via_ip_basemap(chart_data):
             if response.country.name != 'China':
                 country = response.country.name
     for i in dict_city.keys():
+        if pickle.loads(i)[0] is None:  # Handle the situation that no location found in maxmind db
+            continue
         lat.append(float(pickle.loads(i)[0]))
         lon.append(float(pickle.loads(i)[1]))
         alert_num.append(float(dict_city[i]))
+    if not alert_num:
+        logger.warning("All ip are internal or not found, can't generate ip location map")
+        return 1
     # data for folium
     folium_data = []
     for i, n in enumerate(lat):
@@ -575,15 +652,16 @@ def reason_type_chart_pygal(chart_data):
     pie_chart.render_to_file('%sreason_type_pie.svg' % PIC_DIR)
 
 
-# reason_type_chart_pygal(get_data_by_reasons(DB_NAME))
-# ip_source_chart_pygal(get_top10_ip(DB_NAME))
-# #alerts_world_map_via_ip(get_top10_ip(DB_NAME))
-# alerts_by_date_chart_pygal(get_alerts_time_reason(DB_NAME))
-# all_alert_counts_by_reason_24h(DB_NAME)
-# ip_num = get_distinct_ip_num(DB_NAME)
-# alerts_world_map_via_ip_basemap(get_top10_ip(DB_NAME, limit=ip_num))
-# uri_counts_by_reason(14, get_uri_by_reason(14, DB_NAME))
-# export_all_ip(DB_NAME)
+update_ip_by_xff(DB_NAME)
+reason_type_chart_pygal(get_data_by_reasons(DB_NAME))
+ip_source_chart_pygal(get_top10_ip(DB_NAME))
+#alerts_world_map_via_ip(get_top10_ip(DB_NAME))
+alerts_by_date_chart_pygal(get_alerts_time_reason(DB_NAME))
+all_alert_counts_by_reason_24h(DB_NAME)
+ip_num = get_distinct_ip_num(DB_NAME)
+alerts_world_map_via_ip_basemap(get_top10_ip(DB_NAME, limit=ip_num))
+uri_counts_by_reason(14, get_uri_by_reason(14, DB_NAME))
+export_all_ip(DB_NAME)
 
 
 #top_reasons = get_data_by_reasons(DB_NAME, 'cn')
